@@ -1,0 +1,1670 @@
+-- Garden Controller v5.23
+-- Changes vs v5.22:
+--   1. Plant Rush: completely rewritten auto-aim loop
+--      - 0.2s scan interval for fast enemy tracking
+--      - Priority tier logic: Small > Medium > Tough > Boss
+--      - Auto-equips TomatoShooter from backpack when enemies detected
+--      - After equip: forces camera zoom-out (CameraMinZoomDistance trick)
+--        so the game doesn't snap to first-person view
+--      - Auto-aim only (no FireServer) — TomatoShooter fires automatically
+--        when the reticle is on target
+--      - Velocity lead prediction (0.1s) for moving enemies
+--   2. Removed old AutoShoot / FireServer / ShootEvent logic from Plant Rush
+--   3. Floor 1 Auto Fertilize fix retained from v5.22
+
+local Players=game:GetService("Players")
+local TweenService=game:GetService("TweenService")
+local UserInputService=game:GetService("UserInputService")
+local VirtualUser=game:GetService("VirtualUser")
+local RunService=game:GetService("RunService")
+local player=Players.LocalPlayer
+local SAVE_FILE="GardenController_save.json"
+
+local rollEnabled,sellEnabled,buyEnabled,gearEnabled=false,false,false,false
+local honeycombEnabled,ufoEnabled,discardEnabled=false,false,false
+local farmEnabled,farm2Enabled,active=false,false,true
+local keybindEnabled,currentKeybind=true,Enum.KeyCode.RightBracket
+local listeningForKey=false
+local speedEnabled,speedValue=false,16
+local infiniteJumpEnabled,flyEnabled,noclipEnabled=false,false,false
+local autoShootEnabled=false
+local autoEquipTomato=false
+local selectedSeeds,selectedGear,selectedDiscard={},{},{}
+local selectedRarities={}
+local rarityBuyAllEnabled=false
+local saveRegistry={toggles={},checkRows={},setKeybind=nil}
+local FARM2_PLANT_NAME="Durian"
+local FARM_PLANT_NAME="Durian"
+local FARM4_PLANT_NAME="Durian"
+
+local PLANT_RUSH_PRIORITY={"Small Plant","Medium Plant","Tough Plant","Boss Plant"}
+
+local SEED_PRICES={
+    ["Carrot"]=100,["Beetroot"]=250,["Pumpkin"]=500,
+    ["Wheat"]=600,["Melon"]=1200,["Onion"]=2500,["Cantaloupe"]=3500,["Watermelon"]=5000,["Blueberry"]=15000,
+    ["Grape"]=65000,["Bamboo"]=90000,["Peach"]=120000,
+    ["Corn"]=200000,["Plum"]=200000,["Cauliflower"]=500000,["Nectarine"]=600000,["Sunflower"]=650000,["Citrus"]=850000,
+    ["Spring Onion"]=2500000,["Glasswing"]=80000000,["Strawberry"]=30000000,["Beanstalk"]=55000000,["Tomato"]=0,
+    ["Banana"]=30000000,["Iron Fern"]=4000000000,["Apple"]=500000000,
+    ["Golden Apple"]=5000000000,["Crystalberry"]=0,
+    ["Moonflower"]=70000000000,["Passionfruit"]=55000000,["Pepper"]=900000000,["Void Fruit"]=15000000000000,["Elder Dragonroot"]=0,
+    ["Durian"]=100000000000000,["Papaya"]=150000000000000,["Ghost Pepper"]=275000000000000,["Ember Fruit"]=350000000000000,["Aurora Lotus"]=750000000000000,
+}
+
+local Seeds={
+    {name="Carrot",rarity="Common",find=function()return workspace:FindFirstChild("Carrot")end,child="Union",prompt="BuySeed"},
+    {name="Beetroot",rarity="Common",find=function()return workspace:FindFirstChild("Beetroot")end,child="Union",prompt="BuySeed"},
+    {name="Pumpkin",rarity="Common",find=function()return workspace:FindFirstChild("Pumpkin")end,child="Fruit",prompt="BuySeed"},
+    {name="Wheat",rarity="Uncommon",find=function()return workspace:FindFirstChild("Wheat")end,child="Union",prompt="BuySeed"},
+    {name="Melon",rarity="Uncommon",find=function()return workspace:FindFirstChild("Melon")end,child="Fruit",prompt="BuySeed"},
+    {name="Onion",rarity="Uncommon",find=function()return workspace:FindFirstChild("Onion")end,child="Union",prompt="BuySeed"},
+    {name="Cantaloupe",rarity="Uncommon",find=function()return workspace:FindFirstChild("Cantaloupe")end,child="Fruit",prompt="BuySeed"},
+    {name="Watermelon",rarity="Uncommon",find=function()return workspace:FindFirstChild("Watermelon")end,child="Union",prompt="BuySeed"},
+    {name="Blueberry",rarity="Uncommon",find=function()return workspace:FindFirstChild("Blueberry")end,child="Union",prompt="BuySeed"},
+    {name="Grape",rarity="Rare",find=function()return workspace:FindFirstChild("Grape")end,child="Union",prompt="BuySeed"},
+    {name="Bamboo",rarity="Rare",find=function()return workspace:FindFirstChild("Bamboo")end,child="Union",prompt="BuySeed"},
+    {name="Peach",rarity="Rare",find=function()return workspace:FindFirstChild("Peach")end,child="Fruit",prompt="BuySeed"},
+    {name="Corn",rarity="Epic",find=function()return workspace:FindFirstChild("Corn")end,child="Union",prompt="BuySeed"},
+    {name="Plum",rarity="Epic",find=function()return workspace:FindFirstChild("Plum")end,child="Fruit",prompt="BuySeed"},
+    {name="Cauliflower",rarity="Epic",find=function()return workspace:FindFirstChild("Cauliflower")end,child="Union",prompt="BuySeed"},
+    {name="Nectarine",rarity="Epic",find=function()return workspace:FindFirstChild("Nectarine")end,child="Fruit",prompt="BuySeed"},
+    {name="Sunflower",rarity="Epic",find=function()return workspace:FindFirstChild("Sunflower")end,child="Primary",prompt="BuySeed"},
+    {name="Citrus",rarity="Epic",find=function()return workspace:FindFirstChild("Citrus")end,child="Union",prompt="BuySeed"},
+    {name="Glasswing",rarity="Secret",find=function()return workspace:FindFirstChild("Glasswing")end,child="Icosphere.002",prompt="BuySeed"},
+    {name="Spring Onion",rarity="Secret",find=function()return workspace:FindFirstChild("Spring Onion")end,child="Union",prompt="BuySeed"},
+    {name="Strawberry",rarity="Secret",find=function()return workspace:FindFirstChild("Strawberry")end,child="Union",prompt="BuySeed"},
+    {name="Beanstalk",rarity="Secret",find=function()return workspace:FindFirstChild("Beanstalk")end,child="Union",prompt="BuySeed"},
+    {name="Tomato",rarity="Secret",find=function()return workspace:FindFirstChild("Tomato")end,child="Union",prompt="BuySeed"},
+    {name="Banana",rarity="Legendary",find=function()return workspace:FindFirstChild("Banana")end,child="Handle",prompt="BuySeed"},
+    {name="Iron Fern",rarity="Prismatic",find=function()return workspace:FindFirstChild("Iron Fern")end,child="Root3.009",prompt="BuySeed"},
+    {name="Apple",rarity="Prismatic",find=function()return workspace:FindFirstChild("Apple")end,child="Union",prompt="BuySeed"},
+    {name="Golden Apple",rarity="Divine",find=function()return workspace:FindFirstChild("Golden Apple")end,child="Fruit",prompt="BuySeed"},
+    {name="Crystalberry",rarity="Divine",find=function()return workspace:FindFirstChild("Crystalberry")end,child="Icosphere.002",prompt="BuySeed"},
+    {name="Moonflower",rarity="Exotic",find=function()return workspace:FindFirstChild("Moonflower")end,child="Moon",prompt="BuySeed"},
+    {name="Passionfruit",rarity="Exotic",find=function()return workspace:FindFirstChild("Passionfruit")end,child="PassionFruitBot",prompt="BuySeed"},
+    {name="Pepper",rarity="Exotic",find=function()return workspace:FindFirstChild("Pepper")end,child="Handle",prompt="BuySeed"},
+    {name="Void Fruit",rarity="Exotic",find=function()return workspace:FindFirstChild("Void Fruit")end,child="Meshes/Models Fruits_Cube.022",prompt="BuySeed"},
+    {name="Elder Dragonroot",rarity="Exotic",find=function()return workspace:FindFirstChild("Elder Dragonroot")end,child="Root1.011",prompt="BuySeed"},
+    {name="Durian",rarity="Transcended",find=function()return workspace:FindFirstChild("Durian")end,child="DurianBot",prompt="BuySeed"},
+    {name="Papaya",rarity="Transcended",find=function()return workspace:FindFirstChild("Papaya")end,child="Cube.003",prompt="BuySeed"},
+    {name="Ghost Pepper",rarity="Transcended",find=function()return workspace:FindFirstChild("Ghost Pepper")end,child="GhostPepperBot",prompt="BuySeed"},
+    {name="Ember Fruit",rarity="Transcended",find=function()return workspace:FindFirstChild("Ember Fruit")end,child="Sphere.014",prompt="BuySeed"},
+    {name="Aurora Lotus",rarity="Transcended",find=function()return workspace:FindFirstChild("Aurora Lotus")end,child="Sphere.006",prompt="BuySeed"},
+}
+
+local RARITY_ORDER={"Common","Uncommon","Rare","Epic","Secret","Legendary","Prismatic","Divine","Exotic","Transcended"}
+local RARITY_COLORS={
+    Common=Color3.fromRGB(170,170,170),Uncommon=Color3.fromRGB(100,200,100),Rare=Color3.fromRGB(80,120,220),
+    Epic=Color3.fromRGB(160,80,220),Secret=Color3.fromRGB(220,180,80),Legendary=Color3.fromRGB(255,140,0),
+    Prismatic=Color3.fromRGB(80,220,220),Exotic=Color3.fromRGB(220,80,160),Transcended=Color3.fromRGB(220,60,60),
+    Divine=Color3.fromRGB(255,220,100),
+}
+local seedsByRarity={}
+for _,seed in ipairs(Seeds) do
+    if not seedsByRarity[seed.rarity] then seedsByRarity[seed.rarity]={} end
+    table.insert(seedsByRarity[seed.rarity],seed)
+end
+local seedPlainNames={}
+for _,seed in ipairs(Seeds) do seedPlainNames[seed.name]=seed.name end
+local seedBuyNames={}
+for _,seed in ipairs(Seeds) do table.insert(seedBuyNames,seed.name) end
+local discardSeedNames={}
+for _,seed in ipairs(Seeds) do table.insert(discardSeedNames,seed.name) end
+local GearItems={"Normal Fertilizer","Normal Pet Treat","Acid Spray","Wet Spray","Strong Fertilizer","Strong Pet Treat","Frozen Spray","Autumn Spray","Void Spray","Super Fertilizer","Super Pet Treat","Radioactive Spray","Rainbow Spray","Prismatic Fertilizer","Cosmic Spray","Bubblegum Spray","Fire Spray"}
+local RedeemCodes={"PLANTRUSH","BARF:3","THANKYOU","UPDATE2","UPDATE1","2KLIKES","100KVISITS","250KUSERS"}
+
+-- ══════════════════════════════════════════════
+-- JSON HELPERS
+-- ══════════════════════════════════════════════
+local function jsonStr(s) return tostring(s):gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n'):gsub('\r','\\r'):gsub('\t','\\t') end
+local function jsonEncode(t)
+    local lines={'{'};table.insert(lines,string.format('  "keybind": "%s",',jsonStr(t.keybind or "RightBracket")))
+    table.insert(lines,string.format('  "speedValue": %d,',t.speedValue or 16))
+    table.insert(lines,string.format('  "farm2PlantName": "%s",',jsonStr(t.farm2PlantName or "Durian")))
+    table.insert(lines,string.format('  "farmPlantName": "%s",',jsonStr(t.farmPlantName or "Durian")))
+    table.insert(lines,string.format('  "farm4PlantName": "%s",',jsonStr(t.farm4PlantName or "Durian")))
+    table.insert(lines,'  "toggles": {')
+    local tkeys={};for k in pairs(t.toggles or {}) do table.insert(tkeys,k) end;table.sort(tkeys)
+    for i,k in ipairs(tkeys) do table.insert(lines,string.format('    "%s": %s%s',jsonStr(k),t.toggles[k] and "true" or "false",i<#tkeys and "," or "")) end
+    table.insert(lines,'  },')
+    local function writeArr(key,arr,last)
+        table.insert(lines,string.format('  "%s": [',key))
+        for i,s in ipairs(arr) do table.insert(lines,string.format('    "%s"%s',jsonStr(s),i<#arr and "," or "")) end
+        table.insert(lines,last and '  ]' or '  ],')
+    end
+    writeArr("seeds",t.seeds or {});writeArr("gear",t.gear or {});writeArr("discard",t.discard or {})
+    writeArr("fertCustom1F1",t.fertCustom1F1 or {});writeArr("fertCustom1F2",t.fertCustom1F2 or {});writeArr("fertCustom1F3",t.fertCustom1F3 or {});writeArr("fertCustom1F4",t.fertCustom1F4 or {})
+    writeArr("fertCustom2F1",t.fertCustom2F1 or {});writeArr("fertCustom2F2",t.fertCustom2F2 or {});writeArr("fertCustom2F3",t.fertCustom2F3 or {});writeArr("fertCustom2F4",t.fertCustom2F4 or {})
+    writeArr("fertCustom3F1",t.fertCustom3F1 or {});writeArr("fertCustom3F2",t.fertCustom3F2 or {});writeArr("fertCustom3F3",t.fertCustom3F3 or {});writeArr("fertCustom3F4",t.fertCustom3F4 or {})
+    writeArr("raritySelected",t.raritySelected or {},true)
+    table.insert(lines,'}');return table.concat(lines,'\n')
+end
+local function parseJsonString(str,pos)
+    pos=pos+1;local chars,len={},#str
+    while pos<=len do
+        local c=str:sub(pos,pos)
+        if c=='"' then return table.concat(chars),pos+1
+        elseif c=='\\' then pos=pos+1;local e=str:sub(pos,pos);table.insert(chars,({['"']='"',['\\']='\\',n='\n',r='\r',t='\t'})[e] or e)
+        else table.insert(chars,c) end;pos=pos+1
+    end;return nil,pos
+end
+local function jsonDecode(str)
+    local result={toggles={},seeds={},gear={},discard={},raritySelected={},farm2PlantName="Durian",farmPlantName="Durian",farm4PlantName="Durian",speedValue=16}
+    for _,fk in ipairs({"fertCustom1","fertCustom2","fertCustom3"}) do
+        for _,fl in ipairs({"F1","F2","F3","F4"}) do result[fk..fl]={} end
+    end
+    local len,pos=#str,1
+    local function skipWS() while pos<=len and str:sub(pos,pos):match('%s') do pos=pos+1 end end
+    local function readString() skipWS();if str:sub(pos,pos)~='"' then return nil end;local v,np=parseJsonString(str,pos);pos=np;return v end
+    local function readBool() skipWS();if str:sub(pos,pos+3)=="true" then pos=pos+4;return true end;if str:sub(pos,pos+4)=="false" then pos=pos+5;return false end end
+    local function readNumber() skipWS();local n="";while pos<=len and str:sub(pos,pos):match('[%d%.%-]') do n=n..str:sub(pos,pos);pos=pos+1 end;return tonumber(n) end
+    local function readArray()
+        local arr={};if str:sub(pos,pos)=='[' then pos=pos+1 end
+        while pos<=len do
+            skipWS();local ac=str:sub(pos,pos)
+            if ac==']' then pos=pos+1;break end;if ac==',' then pos=pos+1;skipWS() end
+            if str:sub(pos,pos)=='"' then local item=readString();if item then table.insert(arr,item) end else pos=pos+1 end
+        end;return arr
+    end
+    skipWS();if str:sub(pos,pos)=='{' then pos=pos+1 end
+    while pos<=len do
+        skipWS();local c=str:sub(pos,pos)
+        if c=='}' then break end;if c==',' then pos=pos+1;skipWS() end
+        local key=readString();if not key then pos=pos+1;continue end
+        skipWS();if str:sub(pos,pos)==':' then pos=pos+1 end;skipWS()
+        if key=="keybind" then result.keybind=readString()
+        elseif key=="speedValue" then result.speedValue=readNumber() or 16
+        elseif key=="farm2PlantName" then result.farm2PlantName=readString() or "Durian"
+        elseif key=="farmPlantName" then result.farmPlantName=readString() or "Durian"
+        elseif key=="farm4PlantName" then result.farm4PlantName=readString() or "Durian"
+        elseif key=="toggles" then
+            if str:sub(pos,pos)=='{' then pos=pos+1 end
+            while pos<=len do
+                skipWS();local tc=str:sub(pos,pos)
+                if tc=='}' then pos=pos+1;break end;if tc==',' then pos=pos+1;skipWS() end
+                local tk=readString();if not tk then pos=pos+1;continue end
+                skipWS();if str:sub(pos,pos)==':' then pos=pos+1 end
+                local tv=readBool();if tk and tv~=nil then result.toggles[tk]=tv end
+            end
+        elseif str:sub(pos,pos)=='[' then result[key]=readArray()
+        else while pos<=len and not str:sub(pos,pos):match('[,}%]]') do pos=pos+1 end end
+    end;return result
+end
+
+-- ══════════════════════════════════════════════
+-- REMOTE EVENTS
+-- ══════════════════════════════════════════════
+local RS=game:GetService("ReplicatedStorage")
+local RollEvent=RS.Remotes.RollSeeds
+local SellEvent=RS.Remotes.SellCrates
+local GearEvent=RS.Remotes.Gear.Transaction
+local HoneycombEvent=RS.Remotes.QueenBee.HoneycombClaimed
+local DiscardEvent=RS.Remotes.DiscardSeed
+local InsertSeedEvent=RS.Remotes.Composter.InsertSeed
+local PullLeverEvent=RS.Remotes.Composter.PullLever
+local RedeemCodeEvent=RS.Remotes.SubmitCode
+local UseFertilizerEvent=nil
+do local ok,r=pcall(function() return RS.Remotes:FindFirstChild("UseFertilizer") end);if ok and r then UseFertilizerEvent=r end end
+
+-- ══════════════════════════════════════════════
+-- COLORS & FONTS
+-- ══════════════════════════════════════════════
+local C={
+    bg=Color3.fromRGB(10,14,10),sidebar=Color3.fromRGB(13,20,13),panel=Color3.fromRGB(16,22,16),
+    titleBg=Color3.fromRGB(20,32,20),border=Color3.fromRGB(42,90,42),accent=Color3.fromRGB(80,200,80),
+    accentDim=Color3.fromRGB(45,110,45),textBright=Color3.fromRGB(210,255,210),textMid=Color3.fromRGB(130,170,130),
+    textDim=Color3.fromRGB(75,100,75),rowHover=Color3.fromRGB(22,34,22),divider=Color3.fromRGB(30,48,30),
+    red=Color3.fromRGB(200,70,70),checkOn=Color3.fromRGB(80,220,80),
+    toggleOn=Color3.fromRGB(61,220,132),toggleOff=Color3.fromRGB(35,50,35),
+    searchBg=Color3.fromRGB(14,20,14),sectionHdr=Color3.fromRGB(50,130,50),
+    navSel=Color3.fromRGB(20,40,20),navHov=Color3.fromRGB(16,28,16),inputBg=Color3.fromRGB(12,18,12),
+    dropdownBg=Color3.fromRGB(12,18,12),dropdownHdr=Color3.fromRGB(18,30,18),
+    bossColor=Color3.fromRGB(220,80,80),smallColor=Color3.fromRGB(80,220,130),
+    lineDivider=Color3.fromRGB(35,65,35),
+}
+local FS={small=16,normal=17,large=18,title=19}
+
+-- ══════════════════════════════════════════════
+-- DESTROY OLD GUI
+-- ══════════════════════════════════════════════
+if player:WaitForChild("PlayerGui"):FindFirstChild("GardenController") then
+    player.PlayerGui.GardenController:Destroy()
+end
+
+-- ══════════════════════════════════════════════
+-- SAVE / LOAD
+-- ══════════════════════════════════════════════
+local fertPlants={}
+for fi=1,4 do
+    fertPlants[fi]={}
+    for _,tk in ipairs({"normal","strong","super"}) do
+        fertPlants[fi][tk]={}
+    end
+end
+
+local fertRefreshCallbacks={}
+
+local function doSave()
+    local sd={
+        keybind=currentKeybind and currentKeybind.Name or "RightBracket",speedValue=speedValue,
+        toggles={},seeds={},gear={},discard={},raritySelected={},
+        farm2PlantName=FARM2_PLANT_NAME,farmPlantName=FARM_PLANT_NAME,farm4PlantName=FARM4_PLANT_NAME,
+    }
+    for fi=1,4 do
+        for tidx,tk in ipairs({"normal","strong","super"}) do
+            local key=string.format("fertCustom%dF%d",tidx,fi)
+            sd[key]={}
+            for n in pairs(fertPlants[fi][tk]) do table.insert(sd[key],n) end
+        end
+    end
+    for key,ctrl in pairs(saveRegistry.toggles) do
+        if key and ctrl and type(ctrl.getState)=="function" then local ok,val=pcall(ctrl.getState);if ok and val~=nil then sd.toggles[tostring(key)]=val end end
+    end
+    for n in pairs(selectedSeeds) do if n then table.insert(sd.seeds,tostring(n)) end end
+    for n in pairs(selectedGear)  do if n then table.insert(sd.gear, tostring(n)) end end
+    for n in pairs(selectedDiscard) do if n then table.insert(sd.discard,tostring(n)) end end
+    for n in pairs(selectedRarities) do if n then table.insert(sd.raritySelected,tostring(n)) end end
+    local eOk,enc=pcall(jsonEncode,sd);if not eOk then return end;pcall(writefile,SAVE_FILE,enc)
+end
+
+local function doLoad()
+    local exists=false
+    if type(isfile)=="function" then exists=isfile(SAVE_FILE) else local ok,c=pcall(readfile,SAVE_FILE);exists=ok and type(c)=="string" and #c>2 end
+    if not exists then return end
+    local ok,content=pcall(readfile,SAVE_FILE);if not ok or type(content)~="string" or #content<2 then return end
+    local dOk,data=pcall(jsonDecode,content);if not dOk or type(data)~="table" then return end
+    if data.keybind and data.keybind~="" then local e=Enum.KeyCode[data.keybind];if e then currentKeybind=e;if saveRegistry.setKeybind then pcall(saveRegistry.setKeybind,e) end end end
+    if data.speedValue then speedValue=data.speedValue;if saveRegistry.setSpeedValue then pcall(saveRegistry.setSpeedValue,speedValue) end end
+    if data.farm2PlantName and data.farm2PlantName~="" then FARM2_PLANT_NAME=data.farm2PlantName;if saveRegistry.setFarm2PlantName then pcall(saveRegistry.setFarm2PlantName,data.farm2PlantName) end end
+    if data.farmPlantName  and data.farmPlantName~=""  then FARM_PLANT_NAME=data.farmPlantName;if saveRegistry.setFarmPlantName then pcall(saveRegistry.setFarmPlantName,data.farmPlantName) end end
+    if data.farm4PlantName and data.farm4PlantName~="" then FARM4_PLANT_NAME=data.farm4PlantName;if saveRegistry.setFarm4PlantName then pcall(saveRegistry.setFarm4PlantName,data.farm4PlantName) end end
+    for fi=1,4 do
+        for tidx,tk in ipairs({"normal","strong","super"}) do
+            local key=string.format("fertCustom%dF%d",tidx,fi)
+            if data[key] then
+                for _,n in ipairs(data[key]) do fertPlants[fi][tk][n]=true end
+            end
+        end
+    end
+    task.delay(0,function()
+        for key,state in pairs(data.toggles) do local ctrl=saveRegistry.toggles[key];if ctrl and type(ctrl.setState)=="function" then pcall(ctrl.setState,state) end end
+        local sg=saveRegistry.checkRows["SeedRow_"];if sg then for _,n in ipairs(data.seeds or {}) do local e=sg[n];if e then pcall(e.setChecked,true) end end end
+        local gg=saveRegistry.checkRows["GearRow_"];if gg then for _,n in ipairs(data.gear or {}) do local e=gg[n];if e then pcall(e.setChecked,true) end end end
+        local dg=saveRegistry.checkRows["DiscardRow_"];if dg then for _,n in ipairs(data.discard or {}) do local e=dg[n];if e then pcall(e.setChecked,true) end end end
+        for fi=1,4 do
+            if fertRefreshCallbacks[fi] then
+                for _,tk in ipairs({"normal","strong","super"}) do
+                    if fertRefreshCallbacks[fi][tk] then pcall(fertRefreshCallbacks[fi][tk]) end
+                end
+            end
+        end
+    end)
+end
+
+-- ══════════════════════════════════════════════
+-- SCREEN GUI
+-- ══════════════════════════════════════════════
+local ScreenGui=Instance.new("ScreenGui")
+ScreenGui.Name="GardenController";ScreenGui.ResetOnSpawn=false
+ScreenGui.ZIndexBehavior=Enum.ZIndexBehavior.Global;ScreenGui.DisplayOrder=99
+ScreenGui.Parent=player:WaitForChild("PlayerGui")
+
+local FloatBtn=Instance.new("TextButton")
+FloatBtn.Size=UDim2.new(0,44,0,44);FloatBtn.Position=UDim2.new(0,14,0.5,-22)
+FloatBtn.BackgroundColor3=C.titleBg;FloatBtn.Text="🌿";FloatBtn.TextSize=20
+FloatBtn.BorderSizePixel=0;FloatBtn.Visible=false;FloatBtn.ZIndex=200
+FloatBtn.Font=Enum.Font.GothamBold;FloatBtn.TextColor3=C.accent;FloatBtn.AutoButtonColor=false;FloatBtn.Parent=ScreenGui
+Instance.new("UICorner",FloatBtn).CornerRadius=UDim.new(1,0)
+Instance.new("UIStroke",FloatBtn).Color=C.border
+FloatBtn.MouseEnter:Connect(function() TweenService:Create(FloatBtn,TweenInfo.new(0.12),{BackgroundColor3=C.navSel}):Play() end)
+FloatBtn.MouseLeave:Connect(function() TweenService:Create(FloatBtn,TweenInfo.new(0.12),{BackgroundColor3=C.titleBg}):Play() end)
+
+local MIN_W,MIN_H=480,300
+local SIDEBAR_W=96
+
+local Frame=Instance.new("Frame")
+Frame.Name="MainFrame"
+Frame.Size=UDim2.new(0,480,0,460)
+Frame.Position=UDim2.new(0.5,-240,0.5,-230)
+Frame.BackgroundColor3=C.bg;Frame.BorderSizePixel=0;Frame.ClipsDescendants=false;Frame.ZIndex=5;Frame.Parent=ScreenGui
+Instance.new("UICorner",Frame).CornerRadius=UDim.new(0,10)
+Instance.new("UIStroke",Frame).Color=C.border
+
+local InnerClip=Instance.new("Frame",Frame)
+InnerClip.Size=UDim2.new(1,0,1,0);InnerClip.BackgroundTransparency=1;InnerClip.BorderSizePixel=0;InnerClip.ClipsDescendants=true;InnerClip.ZIndex=5
+
+local TitleBar=Instance.new("Frame",InnerClip)
+TitleBar.Size=UDim2.new(1,0,0,36);TitleBar.BackgroundColor3=C.titleBg;TitleBar.BorderSizePixel=0;TitleBar.ZIndex=10
+Instance.new("UICorner",TitleBar).CornerRadius=UDim.new(0,10)
+local TFill=Instance.new("Frame",TitleBar);TFill.Size=UDim2.new(1,0,0.5,0);TFill.Position=UDim2.new(0,0,0.5,0);TFill.BackgroundColor3=C.titleBg;TFill.BorderSizePixel=0;TFill.ZIndex=9
+local TitleIcon=Instance.new("TextLabel",TitleBar);TitleIcon.Size=UDim2.new(0,28,1,0);TitleIcon.Position=UDim2.new(0,8,0,0);TitleIcon.BackgroundTransparency=1;TitleIcon.Text="🌿";TitleIcon.TextSize=16;TitleIcon.Font=Enum.Font.GothamBold;TitleIcon.ZIndex=11
+local TitleLbl=Instance.new("TextLabel",TitleBar)
+TitleLbl.Size=UDim2.new(1,-100,1,0);TitleLbl.Position=UDim2.new(0,38,0,0);TitleLbl.BackgroundTransparency=1
+TitleLbl.Text="Garden Controller  v5.23";TitleLbl.TextColor3=C.textBright;TitleLbl.TextSize=FS.title
+TitleLbl.Font=Enum.Font.GothamBold;TitleLbl.TextXAlignment=Enum.TextXAlignment.Left;TitleLbl.ZIndex=11
+local TLine=Instance.new("Frame",InnerClip);TLine.Size=UDim2.new(1,-16,0,1);TLine.Position=UDim2.new(0,8,0,36);TLine.BackgroundColor3=C.accentDim;TLine.BorderSizePixel=0;TLine.ZIndex=10
+Instance.new("UIGradient",TLine).Color=ColorSequence.new({ColorSequenceKeypoint.new(0,C.accent),ColorSequenceKeypoint.new(0.5,C.accentDim),ColorSequenceKeypoint.new(1,C.bg)})
+local MinBtn=Instance.new("TextButton",TitleBar);MinBtn.Size=UDim2.new(0,22,0,22);MinBtn.Position=UDim2.new(1,-52,0.5,-11);MinBtn.BackgroundColor3=C.toggleOff;MinBtn.Text="–";MinBtn.TextColor3=C.textMid;MinBtn.TextSize=14;MinBtn.Font=Enum.Font.GothamBold;MinBtn.AutoButtonColor=false;MinBtn.ZIndex=12;Instance.new("UICorner",MinBtn).CornerRadius=UDim.new(0,5)
+local CloseBtn=Instance.new("TextButton",TitleBar);CloseBtn.Size=UDim2.new(0,22,0,22);CloseBtn.Position=UDim2.new(1,-26,0.5,-11);CloseBtn.BackgroundColor3=Color3.fromRGB(80,22,22);CloseBtn.Text="✕";CloseBtn.TextColor3=C.red;CloseBtn.TextSize=12;CloseBtn.Font=Enum.Font.GothamBold;CloseBtn.AutoButtonColor=false;CloseBtn.ZIndex=12;Instance.new("UICorner",CloseBtn).CornerRadius=UDim.new(0,5)
+MinBtn.MouseEnter:Connect(function() TweenService:Create(MinBtn,TweenInfo.new(0.12),{BackgroundColor3=C.accentDim,TextColor3=C.textBright}):Play() end)
+MinBtn.MouseLeave:Connect(function() TweenService:Create(MinBtn,TweenInfo.new(0.12),{BackgroundColor3=C.toggleOff,TextColor3=C.textMid}):Play() end)
+CloseBtn.MouseEnter:Connect(function() TweenService:Create(CloseBtn,TweenInfo.new(0.12),{BackgroundColor3=C.red,TextColor3=Color3.new(1,1,1)}):Play() end)
+CloseBtn.MouseLeave:Connect(function() TweenService:Create(CloseBtn,TweenInfo.new(0.12),{BackgroundColor3=Color3.fromRGB(80,22,22),TextColor3=C.red}):Play() end)
+
+local Body=Instance.new("Frame",InnerClip)
+Body.Size=UDim2.new(1,0,1,-38);Body.Position=UDim2.new(0,0,0,38)
+Body.BackgroundTransparency=1;Body.BorderSizePixel=0;Body.ZIndex=6
+
+local Sidebar=Instance.new("Frame",Body)
+Sidebar.Size=UDim2.new(0,SIDEBAR_W,1,0);Sidebar.BackgroundColor3=C.sidebar;Sidebar.BorderSizePixel=0;Sidebar.ZIndex=7
+local SideDiv=Instance.new("Frame",Body)
+SideDiv.Size=UDim2.new(0,1,1,0);SideDiv.Position=UDim2.new(0,SIDEBAR_W,0,0);SideDiv.BackgroundColor3=C.border;SideDiv.BorderSizePixel=0;SideDiv.ZIndex=7
+
+local navPages={"Home","Farm","Auto","Event","Misc","Settings"}
+local activeNav="Home";local navBtns={}
+local icons={Home="🏠",Farm="🌾",Auto="⚡",Event="🎪",Misc="🔧",Settings="⚙"}
+local NavLayout=Instance.new("UIListLayout",Sidebar);NavLayout.SortOrder=Enum.SortOrder.LayoutOrder;NavLayout.Padding=UDim.new(0,0)
+local _navPad=Instance.new("Frame",Sidebar);_navPad.Size=UDim2.new(1,0,0,8);_navPad.BackgroundTransparency=1;_navPad.LayoutOrder=0
+
+local function setNavActive(name)
+    activeNav=name
+    for n,btn in pairs(navBtns) do
+        local isA=(n==name)
+        for _,ch in ipairs(btn:GetChildren()) do if ch:IsA("Frame") then ch.Visible=isA end;if ch:IsA("TextLabel") then ch.TextColor3=isA and C.accent or C.textDim end end
+        if isA then btn.BackgroundTransparency=0;btn.BackgroundColor3=C.navSel else btn.BackgroundTransparency=1 end
+    end
+    for _,child in ipairs(Body:GetChildren()) do if child.Name:sub(1,5)=="Page_" then child.Visible=(child.Name=="Page_"..name) end end
+end
+
+for i,pageName in ipairs(navPages) do
+    local btn=Instance.new("TextButton",Sidebar);btn.Name="Nav_"..pageName;btn.Size=UDim2.new(1,0,0,52);btn.BackgroundColor3=Color3.fromRGB(0,0,0);btn.BackgroundTransparency=1;btn.Text="";btn.BorderSizePixel=0;btn.AutoButtonColor=false;btn.LayoutOrder=i
+    local ico=Instance.new("TextLabel",btn);ico.Size=UDim2.new(1,0,0,24);ico.Position=UDim2.new(0,0,0,6);ico.BackgroundTransparency=1;ico.Text=icons[pageName] or "•";ico.TextSize=16;ico.Font=Enum.Font.GothamBold;ico.TextColor3=C.textDim;ico.TextXAlignment=Enum.TextXAlignment.Center;ico.ZIndex=8
+    local lbl=Instance.new("TextLabel",btn);lbl.Size=UDim2.new(1,-4,0,16);lbl.Position=UDim2.new(0,2,0,28);lbl.BackgroundTransparency=1;lbl.Text=pageName;lbl.TextSize=FS.small;lbl.Font=Enum.Font.GothamBold;lbl.TextColor3=C.textDim;lbl.TextXAlignment=Enum.TextXAlignment.Center;lbl.TextWrapped=true;lbl.ZIndex=8
+    local bar=Instance.new("Frame",btn);bar.Size=UDim2.new(0,3,0.6,0);bar.Position=UDim2.new(0,0,0.2,0);bar.BackgroundColor3=C.accent;bar.BorderSizePixel=0;bar.Visible=false;bar.ZIndex=9;Instance.new("UICorner",bar).CornerRadius=UDim.new(1,0)
+    navBtns[pageName]=btn
+    btn.MouseButton1Click:Connect(function() setNavActive(pageName) end)
+    btn.MouseEnter:Connect(function() if activeNav~=pageName then TweenService:Create(btn,TweenInfo.new(0.1),{BackgroundTransparency=0,BackgroundColor3=C.navHov}):Play() end end)
+    btn.MouseLeave:Connect(function() if activeNav~=pageName then TweenService:Create(btn,TweenInfo.new(0.1),{BackgroundTransparency=1}):Play() end end)
+end
+
+-- ══════════════════════════════════════════════
+-- UI BUILDER HELPERS
+-- ══════════════════════════════════════════════
+local CONTENT_X=SIDEBAR_W+1
+local function makePage(name)
+    local page=Instance.new("Frame",Body)
+    page.Name="Page_"..name;page.Size=UDim2.new(1,-CONTENT_X,1,0);page.Position=UDim2.new(0,CONTENT_X,0,0)
+    page.BackgroundTransparency=1;page.BorderSizePixel=0;page.Visible=false;page.ZIndex=7;return page
+end
+local function makeScroll(parent)
+    local scroll=Instance.new("ScrollingFrame",parent);scroll.Size=UDim2.new(1,0,1,0);scroll.BackgroundTransparency=1;scroll.BorderSizePixel=0;scroll.ScrollBarThickness=3;scroll.ScrollBarImageColor3=C.accentDim;scroll.CanvasSize=UDim2.new(0,0,0,0);scroll.ZIndex=8
+    local layout=Instance.new("UIListLayout",scroll);layout.SortOrder=Enum.SortOrder.LayoutOrder;layout.Padding=UDim.new(0,0)
+    local pad=Instance.new("UIPadding",scroll);pad.PaddingLeft=UDim.new(0,8);pad.PaddingRight=UDim.new(0,8);pad.PaddingTop=UDim.new(0,8);pad.PaddingBottom=UDim.new(0,8)
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() scroll.CanvasSize=UDim2.new(0,0,0,layout.AbsoluteContentSize.Y+16) end)
+    return scroll,layout
+end
+local forceOffList={}
+local function makeSpacer(parent,h) local s=Instance.new("Frame",parent);s.Size=UDim2.new(1,0,0,h);s.BackgroundTransparency=1;s.BorderSizePixel=0;return s end
+local function makeSectionHeader(parent,icon,text)
+    local row=Instance.new("Frame",parent);row.Size=UDim2.new(1,0,0,26);row.BackgroundColor3=Color3.fromRGB(14,24,14);row.BorderSizePixel=0;Instance.new("UICorner",row).CornerRadius=UDim.new(0,5)
+    local lbl=Instance.new("TextLabel",row);lbl.Size=UDim2.new(1,-8,1,0);lbl.Position=UDim2.new(0,10,0,0);lbl.BackgroundTransparency=1;lbl.Text=icon.."  "..text;lbl.TextColor3=C.sectionHdr;lbl.TextSize=FS.small;lbl.Font=Enum.Font.GothamBold;lbl.TextXAlignment=Enum.TextXAlignment.Left;lbl.ZIndex=9
+    local bar=Instance.new("Frame",row);bar.Size=UDim2.new(0,2,0.6,0);bar.Position=UDim2.new(0,0,0.2,0);bar.BackgroundColor3=C.accent;bar.BorderSizePixel=0;Instance.new("UICorner",bar).CornerRadius=UDim.new(1,0)
+    return row
+end
+local function makeToggleRow(parent,icon,label,defaultOn,onToggle,saveKey)
+    local row=Instance.new("TextButton",parent);row.Size=UDim2.new(1,0,0,36);row.BackgroundColor3=C.panel;row.BorderSizePixel=0;row.Text="";row.AutoButtonColor=false;Instance.new("UICorner",row).CornerRadius=UDim.new(0,7)
+    local strip=Instance.new("Frame",row);strip.Size=UDim2.new(0,3,0.6,0);strip.Position=UDim2.new(0,0,0.2,0);strip.BackgroundColor3=defaultOn and C.accent or C.accentDim;strip.BorderSizePixel=0;Instance.new("UICorner",strip).CornerRadius=UDim.new(1,0)
+    local lbl=Instance.new("TextLabel",row);lbl.Size=UDim2.new(1,-70,1,0);lbl.Position=UDim2.new(0,12,0,0);lbl.BackgroundTransparency=1;lbl.Text=icon.."  "..label;lbl.TextColor3=defaultOn and C.textBright or C.textMid;lbl.TextSize=FS.normal;lbl.Font=Enum.Font.Gotham;lbl.TextXAlignment=Enum.TextXAlignment.Left;lbl.ZIndex=9
+    local badge=Instance.new("TextLabel",row);badge.Size=UDim2.new(0,36,0,18);badge.Position=UDim2.new(1,-44,0.5,-9);badge.BackgroundColor3=defaultOn and C.toggleOn or C.toggleOff;badge.Text=defaultOn and "ON" or "OFF";badge.TextColor3=defaultOn and Color3.fromRGB(0,0,0) or C.textDim;badge.TextSize=FS.small;badge.Font=Enum.Font.GothamBold;badge.BorderSizePixel=0;badge.ZIndex=9;Instance.new("UICorner",badge).CornerRadius=UDim.new(1,0)
+    local state=defaultOn
+    local function applyState(s)
+        state=s;lbl.TextColor3=s and C.textBright or C.textMid;badge.Text=s and "ON" or "OFF"
+        TweenService:Create(badge,TweenInfo.new(0.15),{BackgroundColor3=s and C.toggleOn or C.toggleOff,TextColor3=s and Color3.fromRGB(0,0,0) or C.textDim}):Play()
+        TweenService:Create(strip,TweenInfo.new(0.15),{BackgroundColor3=s and C.accent or C.accentDim}):Play()
+        if onToggle then onToggle(s) end
+    end
+    table.insert(forceOffList,function() if state then applyState(false) end end)
+    row.MouseButton1Click:Connect(function() applyState(not state) end)
+    row.MouseEnter:Connect(function() TweenService:Create(row,TweenInfo.new(0.1),{BackgroundColor3=C.rowHover}):Play() end)
+    row.MouseLeave:Connect(function() TweenService:Create(row,TweenInfo.new(0.1),{BackgroundColor3=C.panel}):Play() end)
+    if saveKey then saveRegistry.toggles[saveKey]={getState=function() return state end,setState=function(s) applyState(s) end} end
+    return row,applyState
+end
+
+local function makeCollapsibleSection(parent,icon,label,buildContent)
+    local isOpen=false
+    local wrapper=Instance.new("Frame",parent);wrapper.Name="Section_"..label;wrapper.Size=UDim2.new(1,0,0,32);wrapper.BackgroundColor3=C.dropdownBg;wrapper.BorderSizePixel=0;wrapper.ClipsDescendants=true;Instance.new("UICorner",wrapper).CornerRadius=UDim.new(0,7);Instance.new("UIStroke",wrapper).Color=C.border
+    local header=Instance.new("TextButton",wrapper);header.Size=UDim2.new(1,0,0,32);header.BackgroundColor3=C.dropdownHdr;header.BorderSizePixel=0;header.Text="";header.AutoButtonColor=false;header.ZIndex=10;Instance.new("UICorner",header).CornerRadius=UDim.new(0,6)
+    local hBar=Instance.new("Frame",header);hBar.Size=UDim2.new(0,3,0.55,0);hBar.Position=UDim2.new(0,0,0.225,0);hBar.BackgroundColor3=C.accent;hBar.BorderSizePixel=0;Instance.new("UICorner",hBar).CornerRadius=UDim.new(1,0)
+    local hIcon=Instance.new("TextLabel",header);hIcon.Size=UDim2.new(0,22,1,0);hIcon.Position=UDim2.new(0,10,0,0);hIcon.BackgroundTransparency=1;hIcon.Text=icon;hIcon.TextSize=14;hIcon.Font=Enum.Font.GothamBold;hIcon.TextColor3=C.accent;hIcon.TextXAlignment=Enum.TextXAlignment.Center;hIcon.ZIndex=11
+    local hLabel=Instance.new("TextLabel",header);hLabel.Size=UDim2.new(1,-64,1,0);hLabel.Position=UDim2.new(0,34,0,0);hLabel.BackgroundTransparency=1;hLabel.Text=label;hLabel.TextColor3=C.textBright;hLabel.TextSize=FS.normal;hLabel.Font=Enum.Font.GothamBold;hLabel.TextXAlignment=Enum.TextXAlignment.Left;hLabel.ZIndex=11
+    local chevron=Instance.new("TextLabel",header);chevron.Size=UDim2.new(0,20,1,0);chevron.Position=UDim2.new(1,-26,0,0);chevron.BackgroundTransparency=1;chevron.Text="▶";chevron.TextSize=10;chevron.Font=Enum.Font.GothamBold;chevron.TextColor3=C.accent;chevron.TextXAlignment=Enum.TextXAlignment.Center;chevron.ZIndex=11
+    local inner=Instance.new("Frame",wrapper);inner.Name="Inner";inner.Size=UDim2.new(1,0,0,0);inner.Position=UDim2.new(0,0,0,32);inner.BackgroundTransparency=1;inner.BorderSizePixel=0;inner.ZIndex=10
+    local iLayout=Instance.new("UIListLayout",inner);iLayout.SortOrder=Enum.SortOrder.LayoutOrder;iLayout.Padding=UDim.new(0,6)
+    local iPad=Instance.new("UIPadding",inner);iPad.PaddingLeft=UDim.new(0,6);iPad.PaddingRight=UDim.new(0,6);iPad.PaddingTop=UDim.new(0,8);iPad.PaddingBottom=UDim.new(0,8)
+    buildContent(inner)
+    local function recalcH() return iLayout.AbsoluteContentSize.Y+16 end
+    iLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        local h=recalcH();inner.Size=UDim2.new(1,0,0,h);if isOpen then wrapper.Size=UDim2.new(1,0,0,32+h) end
+    end)
+    local function setOpen(open)
+        isOpen=open
+        if open then chevron.Text="▼";local h=recalcH();inner.Size=UDim2.new(1,0,0,h);TweenService:Create(wrapper,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Size=UDim2.new(1,0,0,32+h)}):Play()
+        else chevron.Text="▶";TweenService:Create(wrapper,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{Size=UDim2.new(1,0,0,32)}):Play() end
+    end
+    header.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
+    header.MouseEnter:Connect(function() TweenService:Create(header,TweenInfo.new(0.1),{BackgroundColor3=C.rowHover}):Play() end)
+    header.MouseLeave:Connect(function() if not isOpen then TweenService:Create(header,TweenInfo.new(0.1),{BackgroundColor3=C.dropdownHdr}):Play() end end)
+    return wrapper
+end
+
+local function makePlainDropdown(parent,prefix,icon,label,items,selectedTable)
+    local isOpen=false
+    local ITEM_H,HEADER_H,SEARCH_H,PAD=26,32,28,12
+    local wrapper=Instance.new("Frame",parent);wrapper.Name="DD_"..label;wrapper.Size=UDim2.new(1,0,0,HEADER_H);wrapper.BackgroundColor3=C.dropdownBg;wrapper.BorderSizePixel=0;wrapper.ClipsDescendants=true;Instance.new("UICorner",wrapper).CornerRadius=UDim.new(0,7);Instance.new("UIStroke",wrapper).Color=C.border
+    local header=Instance.new("TextButton",wrapper);header.Size=UDim2.new(1,0,0,HEADER_H);header.BackgroundColor3=C.dropdownHdr;header.BorderSizePixel=0;header.Text="";header.AutoButtonColor=false;header.ZIndex=10;Instance.new("UICorner",header).CornerRadius=UDim.new(0,6)
+    local hBar=Instance.new("Frame",header);hBar.Size=UDim2.new(0,3,0.55,0);hBar.Position=UDim2.new(0,0,0.225,0);hBar.BackgroundColor3=C.accent;hBar.BorderSizePixel=0;Instance.new("UICorner",hBar).CornerRadius=UDim.new(1,0)
+    Instance.new("TextLabel",header).Size=UDim2.new(0,22,1,0);local hIco=header:FindFirstChildOfClass("TextLabel");hIco.Position=UDim2.new(0,10,0,0);hIco.BackgroundTransparency=1;hIco.Text=icon;hIco.TextSize=14;hIco.Font=Enum.Font.GothamBold;hIco.TextColor3=C.accent;hIco.TextXAlignment=Enum.TextXAlignment.Center;hIco.ZIndex=11
+    local hLbl=Instance.new("TextLabel",header);hLbl.Size=UDim2.new(1,-64,1,0);hLbl.Position=UDim2.new(0,34,0,0);hLbl.BackgroundTransparency=1;hLbl.Text=label;hLbl.TextColor3=C.textBright;hLbl.TextSize=FS.normal;hLbl.Font=Enum.Font.GothamBold;hLbl.TextXAlignment=Enum.TextXAlignment.Left;hLbl.ZIndex=11
+    local chev=Instance.new("TextLabel",header);chev.Size=UDim2.new(0,20,1,0);chev.Position=UDim2.new(1,-26,0,0);chev.BackgroundTransparency=1;chev.Text="▶";chev.TextSize=10;chev.Font=Enum.Font.GothamBold;chev.TextColor3=C.accent;chev.TextXAlignment=Enum.TextXAlignment.Center;chev.ZIndex=11
+    local inner=Instance.new("Frame",wrapper);inner.Name="Inner";inner.Position=UDim2.new(0,0,0,HEADER_H);inner.BackgroundTransparency=1;inner.BorderSizePixel=0;inner.ZIndex=10
+    local iL=Instance.new("UIListLayout",inner);iL.SortOrder=Enum.SortOrder.LayoutOrder;iL.Padding=UDim.new(0,0)
+    local iP=Instance.new("UIPadding",inner);iP.PaddingLeft=UDim.new(0,6);iP.PaddingRight=UDim.new(0,6);iP.PaddingTop=UDim.new(0,6);iP.PaddingBottom=UDim.new(0,6)
+    local sW=Instance.new("Frame",inner);sW.Size=UDim2.new(1,0,0,SEARCH_H);sW.BackgroundColor3=C.searchBg;sW.BorderSizePixel=0;sW.LayoutOrder=0;Instance.new("UICorner",sW).CornerRadius=UDim.new(0,6);Instance.new("UIStroke",sW).Color=C.border
+    local sIco=Instance.new("TextLabel",sW);sIco.Size=UDim2.new(0,20,1,0);sIco.Position=UDim2.new(0,4,0,0);sIco.BackgroundTransparency=1;sIco.Text="🔍";sIco.TextSize=11;sIco.Font=Enum.Font.GothamBold;sIco.ZIndex=12
+    local sBox=Instance.new("TextBox",sW);sBox.Size=UDim2.new(1,-24,1,0);sBox.Position=UDim2.new(0,22,0,0);sBox.BackgroundTransparency=1;sBox.PlaceholderText="Search...";sBox.PlaceholderColor3=C.textDim;sBox.Text="";sBox.TextColor3=C.textBright;sBox.TextSize=FS.normal;sBox.Font=Enum.Font.Code;sBox.ClearTextOnFocus=false;sBox.BorderSizePixel=0;sBox.ZIndex=12
+    if not saveRegistry.checkRows[prefix] then saveRegistry.checkRows[prefix]={} end
+    local lo=1
+    for _,itemName in ipairs(items) do
+        local row=Instance.new("TextButton",inner);row.Size=UDim2.new(1,0,0,ITEM_H);row.BackgroundTransparency=1;row.BorderSizePixel=0;row.Text="";row.Name=prefix..itemName;row.AutoButtonColor=false;row.LayoutOrder=lo;lo=lo+1;row.ZIndex=11
+        local checked=false
+        local rowLbl=Instance.new("TextLabel",row);rowLbl.Size=UDim2.new(1,0,1,0);rowLbl.BackgroundTransparency=1;rowLbl.Text="  ▷ "..itemName;rowLbl.TextColor3=C.textDim;rowLbl.TextSize=FS.normal;rowLbl.Font=Enum.Font.Code;rowLbl.TextXAlignment=Enum.TextXAlignment.Left;rowLbl.ZIndex=12
+        local function setChecked(val) checked=val;if checked then selectedTable[itemName]=true;rowLbl.Text="  ▶ "..itemName;rowLbl.TextColor3=C.accent else selectedTable[itemName]=nil;rowLbl.Text="  ▷ "..itemName;rowLbl.TextColor3=C.textDim end end
+        row.MouseButton1Click:Connect(function() setChecked(not checked) end)
+        row.MouseEnter:Connect(function() if not checked then rowLbl.TextColor3=C.textMid end end)
+        row.MouseLeave:Connect(function() if not checked then rowLbl.TextColor3=C.textDim end end)
+        saveRegistry.checkRows[prefix][itemName]={setChecked=setChecked}
+    end
+    sBox:GetPropertyChangedSignal("Text"):Connect(function()
+        local q=sBox.Text:lower()
+        for _,ch in ipairs(inner:GetChildren()) do if ch:IsA("TextButton") and ch.Name:sub(1,#prefix)==prefix then ch.Visible=(q=="" or ch.Name:sub(#prefix+1):lower():find(q,1,true)~=nil) end end
+    end)
+    local function getH()
+        local cnt=0;for _,ch in ipairs(inner:GetChildren()) do if (ch:IsA("Frame") or ch:IsA("TextButton")) and ch.Visible~=false then cnt=cnt+ch.AbsoluteSize.Y end end
+        return HEADER_H+PAD+SEARCH_H+cnt+PAD
+    end
+    local function setOpen(open)
+        isOpen=open
+        if open then chev.Text="▼";local h=getH();inner.Size=UDim2.new(1,0,0,h-HEADER_H);TweenService:Create(wrapper,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Size=UDim2.new(1,0,0,h)}):Play()
+        else chev.Text="▶";TweenService:Create(wrapper,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{Size=UDim2.new(1,0,0,HEADER_H)}):Play();sBox.Text="" end
+    end
+    header.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
+    header.MouseEnter:Connect(function() TweenService:Create(header,TweenInfo.new(0.1),{BackgroundColor3=C.rowHover}):Play() end)
+    header.MouseLeave:Connect(function() TweenService:Create(header,TweenInfo.new(0.1),{BackgroundColor3=C.dropdownHdr}):Play() end)
+    return wrapper
+end
+
+local function makeRarityDropdown(parent,prefix,icon,label,items,selectedTable)
+    local isOpen=false
+    local ITEM_H,HEADER_H,SEARCH_H,PAD=26,32,28,12
+    local wrapper=Instance.new("Frame",parent);wrapper.Name="DD_"..label;wrapper.Size=UDim2.new(1,0,0,HEADER_H);wrapper.BackgroundColor3=C.dropdownBg;wrapper.BorderSizePixel=0;wrapper.ClipsDescendants=true;Instance.new("UICorner",wrapper).CornerRadius=UDim.new(0,7);Instance.new("UIStroke",wrapper).Color=C.border
+    local header=Instance.new("TextButton",wrapper);header.Size=UDim2.new(1,0,0,HEADER_H);header.BackgroundColor3=C.dropdownHdr;header.BorderSizePixel=0;header.Text="";header.AutoButtonColor=false;header.ZIndex=10;Instance.new("UICorner",header).CornerRadius=UDim.new(0,6)
+    local hBar=Instance.new("Frame",header);hBar.Size=UDim2.new(0,3,0.55,0);hBar.Position=UDim2.new(0,0,0.225,0);hBar.BackgroundColor3=C.accent;hBar.BorderSizePixel=0;Instance.new("UICorner",hBar).CornerRadius=UDim.new(1,0)
+    local hIcoL=Instance.new("TextLabel",header);hIcoL.Size=UDim2.new(0,22,1,0);hIcoL.Position=UDim2.new(0,10,0,0);hIcoL.BackgroundTransparency=1;hIcoL.Text=icon;hIcoL.TextSize=14;hIcoL.Font=Enum.Font.GothamBold;hIcoL.TextColor3=C.accent;hIcoL.TextXAlignment=Enum.TextXAlignment.Center;hIcoL.ZIndex=11
+    local hLbl=Instance.new("TextLabel",header);hLbl.Size=UDim2.new(1,-64,1,0);hLbl.Position=UDim2.new(0,34,0,0);hLbl.BackgroundTransparency=1;hLbl.Text=label;hLbl.TextColor3=C.textBright;hLbl.TextSize=FS.normal;hLbl.Font=Enum.Font.GothamBold;hLbl.TextXAlignment=Enum.TextXAlignment.Left;hLbl.ZIndex=11
+    local chev=Instance.new("TextLabel",header);chev.Size=UDim2.new(0,20,1,0);chev.Position=UDim2.new(1,-26,0,0);chev.BackgroundTransparency=1;chev.Text="▶";chev.TextSize=10;chev.Font=Enum.Font.GothamBold;chev.TextColor3=C.accent;chev.TextXAlignment=Enum.TextXAlignment.Center;chev.ZIndex=11
+    local inner=Instance.new("Frame",wrapper);inner.Name="Inner";inner.Position=UDim2.new(0,0,0,HEADER_H);inner.BackgroundTransparency=1;inner.BorderSizePixel=0;inner.ZIndex=10
+    local iL=Instance.new("UIListLayout",inner);iL.SortOrder=Enum.SortOrder.LayoutOrder;iL.Padding=UDim.new(0,0)
+    local iP=Instance.new("UIPadding",inner);iP.PaddingLeft=UDim.new(0,6);iP.PaddingRight=UDim.new(0,6);iP.PaddingTop=UDim.new(0,6);iP.PaddingBottom=UDim.new(0,6)
+    local sW=Instance.new("Frame",inner);sW.Size=UDim2.new(1,0,0,SEARCH_H);sW.BackgroundColor3=C.searchBg;sW.BorderSizePixel=0;sW.LayoutOrder=0;Instance.new("UICorner",sW).CornerRadius=UDim.new(0,6);Instance.new("UIStroke",sW).Color=C.border
+    local sIco=Instance.new("TextLabel",sW);sIco.Size=UDim2.new(0,20,1,0);sIco.Position=UDim2.new(0,4,0,0);sIco.BackgroundTransparency=1;sIco.Text="🔍";sIco.TextSize=11;sIco.Font=Enum.Font.GothamBold;sIco.ZIndex=12
+    local sBox=Instance.new("TextBox",sW);sBox.Size=UDim2.new(1,-24,1,0);sBox.Position=UDim2.new(0,22,0,0);sBox.BackgroundTransparency=1;sBox.PlaceholderText="Search "..label:lower().."...";sBox.PlaceholderColor3=C.textDim;sBox.Text="";sBox.TextColor3=C.textBright;sBox.TextSize=FS.normal;sBox.Font=Enum.Font.Code;sBox.ClearTextOnFocus=false;sBox.BorderSizePixel=0;sBox.ZIndex=12
+    if not saveRegistry.checkRows[prefix] then saveRegistry.checkRows[prefix]={} end
+    local lo=1
+    for _,rarity in ipairs(RARITY_ORDER) do
+        local rc=RARITY_COLORS[rarity] or C.textMid
+        local group=seedsByRarity[rarity];if not group then continue end
+        local sepRow=Instance.new("Frame",inner);sepRow.Name="Sep_"..rarity;sepRow.Size=UDim2.new(1,0,0,20);sepRow.BackgroundColor3=Color3.fromRGB(14,22,14);sepRow.BorderSizePixel=0;sepRow.LayoutOrder=lo;lo=lo+1
+        local sepLbl=Instance.new("TextLabel",sepRow);sepLbl.Size=UDim2.new(1,-8,1,0);sepLbl.Position=UDim2.new(0,8,0,0);sepLbl.BackgroundTransparency=1;sepLbl.Text="— "..rarity.." —";sepLbl.TextColor3=rc;sepLbl.TextSize=FS.small-1;sepLbl.Font=Enum.Font.GothamBold;sepLbl.TextXAlignment=Enum.TextXAlignment.Left;sepLbl.ZIndex=12
+        for _,seed in ipairs(group) do
+            local itemName=seed.name
+            local inList=false;for _,item in ipairs(items) do if item==itemName then inList=true;break end end
+            if not inList then continue end
+            local row=Instance.new("TextButton",inner);row.Size=UDim2.new(1,0,0,ITEM_H);row.BackgroundTransparency=1;row.BorderSizePixel=0;row.Text="";row.Name=prefix..itemName;row.AutoButtonColor=false;row.LayoutOrder=lo;lo=lo+1;row.ZIndex=11
+            local checked=false
+            local rowLbl=Instance.new("TextLabel",row);rowLbl.Size=UDim2.new(1,0,1,0);rowLbl.BackgroundTransparency=1;rowLbl.Text="  ▷ "..itemName;rowLbl.TextColor3=C.textDim;rowLbl.TextSize=FS.normal;rowLbl.Font=Enum.Font.Code;rowLbl.TextXAlignment=Enum.TextXAlignment.Left;rowLbl.ZIndex=12
+            local function setChecked(val) checked=val;if checked then selectedTable[itemName]=true;rowLbl.Text="  ▶ "..itemName;rowLbl.TextColor3=rc else selectedTable[itemName]=nil;rowLbl.Text="  ▷ "..itemName;rowLbl.TextColor3=C.textDim end end
+            row.MouseButton1Click:Connect(function() setChecked(not checked) end)
+            row.MouseEnter:Connect(function() if not checked then rowLbl.TextColor3=C.textMid end end)
+            row.MouseLeave:Connect(function() if not checked then rowLbl.TextColor3=C.textDim end end)
+            saveRegistry.checkRows[prefix][itemName]={setChecked=setChecked}
+        end
+    end
+    sBox:GetPropertyChangedSignal("Text"):Connect(function()
+        local q=sBox.Text:lower()
+        for _,ch in ipairs(inner:GetChildren()) do
+            if ch.Name:sub(1,4)=="Sep_" then ch.Visible=(q=="")
+            elseif ch.Name:sub(1,#prefix)==prefix then ch.Visible=(q=="" or ch.Name:sub(#prefix+1):lower():find(q,1,true)~=nil) end
+        end
+    end)
+    local function getH()
+        local cnt=0;for _,ch in ipairs(inner:GetChildren()) do if (ch:IsA("Frame") or ch:IsA("TextButton")) and ch.Visible~=false then cnt=cnt+ch.AbsoluteSize.Y end end
+        return HEADER_H+PAD+SEARCH_H+cnt+PAD
+    end
+    local function setOpen(open)
+        isOpen=open
+        if open then chev.Text="▼";local h=getH();inner.Size=UDim2.new(1,0,0,h-HEADER_H);TweenService:Create(wrapper,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Size=UDim2.new(1,0,0,h)}):Play()
+        else chev.Text="▶";TweenService:Create(wrapper,TweenInfo.new(0.18,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{Size=UDim2.new(1,0,0,HEADER_H)}):Play();sBox.Text="" end
+    end
+    header.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
+    header.MouseEnter:Connect(function() TweenService:Create(header,TweenInfo.new(0.1),{BackgroundColor3=C.rowHover}):Play() end)
+    header.MouseLeave:Connect(function() TweenService:Create(header,TweenInfo.new(0.1),{BackgroundColor3=C.dropdownHdr}):Play() end)
+    return wrapper
+end
+
+-- ══════════════════════════════════════════════
+-- MOVEMENT HELPERS
+-- ══════════════════════════════════════════════
+local function teleportTo(position) local char=player.Character;if char then local root=char:FindFirstChild("HumanoidRootPart");if root then root.CFrame=CFrame.new(position);task.wait(0.5) end end end
+local function applySpeed(val) local char=player.Character;if char then local hum=char:FindFirstChildOfClass("Humanoid");if hum then hum.WalkSpeed=val end end end
+task.spawn(function() while true do task.wait(0.1);if speedEnabled and active then applySpeed(speedValue) end end end)
+local jumpConn=nil
+local function setInfiniteJump(state)
+    if jumpConn then jumpConn:Disconnect();jumpConn=nil end
+    if state then jumpConn=UserInputService.JumpRequest:Connect(function() local char=player.Character;if char then local hum=char:FindFirstChildOfClass("Humanoid");if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end end end) end
+end
+local flyConn,bodyGyro,bodyVelocity=nil,nil,nil
+local function setFly(state)
+    local char=player.Character;if not char then return end
+    local root=char:FindFirstChild("HumanoidRootPart");local hum=char:FindFirstChildOfClass("Humanoid");if not root or not hum then return end
+    if state then
+        hum.PlatformStand=true
+        bodyGyro=Instance.new("BodyGyro",root);bodyGyro.MaxTorque=Vector3.new(1e9,1e9,1e9);bodyGyro.CFrame=root.CFrame;bodyGyro.P=1e6
+        bodyVelocity=Instance.new("BodyVelocity",root);bodyVelocity.MaxForce=Vector3.new(1e9,1e9,1e9);bodyVelocity.Velocity=Vector3.zero
+        flyConn=RunService.RenderStepped:Connect(function()
+            if not flyEnabled or not active then return end
+            local cam=workspace.CurrentCamera;if not cam then return end
+            local md=Vector3.zero
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then md=md+cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then md=md-cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then md=md-cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then md=md+cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then md=md+Vector3.new(0,1,0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then md=md-Vector3.new(0,1,0) end
+            bodyVelocity.Velocity=md*50;bodyGyro.CFrame=cam.CFrame
+        end)
+    else
+        if flyConn then flyConn:Disconnect();flyConn=nil end
+        if bodyGyro then bodyGyro:Destroy();bodyGyro=nil end
+        if bodyVelocity then bodyVelocity:Destroy();bodyVelocity=nil end
+        if hum then hum.PlatformStand=false end
+    end
+end
+local noclipConn=nil
+local function setNoclip(state)
+    if noclipConn then noclipConn:Disconnect();noclipConn=nil end
+    if state then
+        noclipConn=RunService.Stepped:Connect(function()
+            if not noclipEnabled or not active then return end
+            local char=player.Character;if not char then return end
+            for _,part in ipairs(char:GetDescendants()) do if part:IsA("BasePart") and part.CanCollide then part.CanCollide=false end end
+        end)
+    else local char=player.Character;if char then for _,part in ipairs(char:GetDescendants()) do if part:IsA("BasePart") then part.CanCollide=true end end end end
+end
+
+-- ══════════════════════════════════════════════
+-- TOMATO SHOOTER HELPERS  (v5.23)
+-- ══════════════════════════════════════════════
+-- isTomatoTool: returns true if the given Tool instance is a TomatoShooter
+local function isTomatoTool(item)
+    if not item:IsA("Tool") then return false end
+    local n=item.Name:lower()
+    return n:find("tomatoshooter",1,true)~=nil
+        or n:find("tomato shooter",1,true)~=nil
+        or n:find("tomato",1,true)~=nil
+end
+
+-- isHoldingTomato: returns true when char already has it equipped
+local function isHoldingTomato()
+    local char=player.Character;if not char then return false end
+    for _,item in ipairs(char:GetChildren()) do
+        if isTomatoTool(item) then return true end
+    end
+    return false
+end
+
+-- forceCameraZoomOut: pushes camera to third-person by temporarily bumping
+-- CameraMinZoomDistance then immediately restoring it.
+-- Uses the LocalPlayer's CameraMinZoomDistance character value if present,
+-- otherwise manipulates the workspace Camera zoom.
+local function forceCameraZoomOut(targetZoom)
+    targetZoom = targetZoom or 12
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+
+    -- Method 1: bump min/max zoom via StarterPlayer properties (client-side writable)
+    local sp = game:GetService("StarterPlayer")
+    pcall(function()
+        local prev = sp.CameraMaxZoomDistance
+        local prevMin = sp.CameraMinZoomDistance
+        sp.CameraMinZoomDistance = targetZoom
+        sp.CameraMaxZoomDistance = math.max(targetZoom + 1, prev)
+        task.wait(0.05)
+        sp.CameraMinZoomDistance = prevMin
+        sp.CameraMaxZoomDistance = prev
+    end)
+
+    -- Method 2: scroll-wheel simulation to force zoom out immediately
+    -- Fires multiple scroll-out events so the engine moves the camera back
+    local VIM = game:GetService("VirtualInputManager")
+    task.spawn(function()
+        for _=1, 10 do
+            pcall(function()
+                VIM:SendMouseWheelEvent(0, 0, false, game) -- false = scroll down = zoom out
+            end)
+            task.wait(0.02)
+        end
+    end)
+end
+
+-- equipTomatoShooter: finds the tool in backpack, equips it, then forces
+-- the camera to zoom out so the game doesn't lock to first-person.
+local function equipTomatoShooter()
+    if isHoldingTomato() then
+        -- Already equipped — just make sure we're not in first-person
+        forceCameraZoomOut()
+        return true
+    end
+    local char = player.Character
+    local bp   = player:FindFirstChild("Backpack")
+    if not char or not bp then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    for _, item in ipairs(bp:GetChildren()) do
+        if isTomatoTool(item) then
+            hum:EquipTool(item)
+            -- Wait one frame for the equip to register, then zoom out
+            task.wait(0.1)
+            forceCameraZoomOut()
+            task.wait(0.1)
+            -- Second nudge in case the game re-asserts first-person on the
+            -- next frame after tool activation
+            forceCameraZoomOut()
+            return true
+        end
+    end
+    return false
+end
+
+-- ══════════════════════════════════════════════
+-- FERTILIZER HELPERS
+-- ══════════════════════════════════════════════
+-- v5.22 FIX retained: Floor 1 has no FloorN subfolder
+local function findDirtInFloorAnyPlot(floorNum, targetPlantName)
+    local results={}
+    local mapFolder=workspace:FindFirstChild("Map");if not mapFolder then return results end
+    local plotsFolder=mapFolder:FindFirstChild("Plots");if not plotsFolder then return results end
+    local lowerTarget=targetPlantName:lower()
+    for _,plotFolder in ipairs(plotsFolder:GetChildren()) do
+        local farmPlot
+        if floorNum == 1 then
+            farmPlot = plotFolder:FindFirstChild("FarmPlot")
+        else
+            local floorFolder = plotFolder:FindFirstChild("Floor"..floorNum)
+            if floorFolder then
+                farmPlot = floorFolder:FindFirstChild("FarmPlot")
+            end
+        end
+        if not farmPlot then continue end
+        for _,subPlot in ipairs(farmPlot:GetChildren()) do
+            local dirtPart=subPlot:FindFirstChild("Dirt");if not dirtPart then continue end
+            if targetPlantName=="" then
+                table.insert(results,{dirt=dirtPart,plotName=plotFolder.Name,subName=subPlot.Name})
+            else
+                for _,child in ipairs(dirtPart:GetChildren()) do
+                    if child.Name:lower():find(lowerTarget,1,true) then
+                        table.insert(results,{dirt=dirtPart,plotName=plotFolder.Name,subName=subPlot.Name});break
+                    end
+                end
+            end
+        end
+    end
+    return results
+end
+
+local function scanFloor(floorNum, plantName)
+    return findDirtInFloorAnyPlot(floorNum, plantName)
+end
+
+local function findFertilizerTool(toolSearchName)
+    local backpack=player:FindFirstChild("Backpack");local char=player.Character;local lowerSearch=toolSearchName:lower()
+    if backpack then for _,item in ipairs(backpack:GetChildren()) do if item.Name:lower():find(lowerSearch,1,true) then return item,"backpack" end end end
+    if char then for _,item in ipairs(char:GetChildren()) do if item:IsA("Tool") and item.Name:lower():find(lowerSearch,1,true) then return item,"equipped" end end end
+    return nil,nil
+end
+local function equipAndUseFertilizer(toolSearchName,dirtPart)
+    local char=player.Character;if not char then return false end
+    local hum=char:FindFirstChildOfClass("Humanoid");if not hum then return false end
+    local tool,location=findFertilizerTool(toolSearchName);if not tool then return false end
+    if location=="backpack" then hum:EquipTool(tool);task.wait(0.2) end
+    if UseFertilizerEvent then pcall(function() UseFertilizerEvent:FireServer(dirtPart) end) end
+    task.wait(0.4);return true
+end
+
+local FERT_TYPES={
+    {key="normal",label="Normal Fertilizer",icon="🌿",toolName="Normal Fertilizer",cooldown=311,color=Color3.fromRGB(100,200,100)},
+    {key="strong",label="Strong Fertilizer", icon="💪",toolName="Strong Fertilizer", cooldown=611,color=Color3.fromRGB(80,200,255)},
+    {key="super", label="Super Fertilizer",  icon="⚡",toolName="Super Fertilizer",  cooldown=911,color=Color3.fromRGB(255,200,60)},
+}
+
+-- ══════════════════════════════════════════════
+-- makeFertSection
+-- ══════════════════════════════════════════════
+local function makeFertSection(body, floorNum, saveKeySuffix)
+    local fertEnabled=false
+    local typeEnabled={normal=false,strong=false,super=false}
+    local lo=0
+    local function nextLO() lo=lo+1;return lo end
+    local fertToggleApply=nil
+
+    local scanLbl=Instance.new("TextLabel",body)
+    scanLbl.Size=UDim2.new(1,0,0,16);scanLbl.BackgroundTransparency=1;scanLbl.LayoutOrder=nextLO()
+    scanLbl.Text="Add plants per fertilizer type below, then Auto Fertilize turns on automatically"
+    scanLbl.TextColor3=C.textMid;scanLbl.TextSize=FS.small-1
+    scanLbl.Font=Enum.Font.Code;scanLbl.TextXAlignment=Enum.TextXAlignment.Left;scanLbl.ZIndex=9
+    Instance.new("UIPadding",scanLbl).PaddingLeft=UDim.new(0,2)
+
+    local th=Instance.new("Frame",body);th.Size=UDim2.new(1,0,0,36);th.BackgroundTransparency=1;th.BorderSizePixel=0;th.LayoutOrder=nextLO()
+
+    local function hasAnyPlants()
+        for _,tk in ipairs({"normal","strong","super"}) do
+            for _ in pairs(fertPlants[floorNum][tk]) do return true end
+        end
+        return false
+    end
+
+    local function getEntriesForType(typeKey)
+        local all={}
+        for plantName in pairs(fertPlants[floorNum][typeKey]) do
+            local entries=scanFloor(floorNum, plantName)
+            for _,e in ipairs(entries) do e.plantName=plantName;table.insert(all,e) end
+        end
+        return all
+    end
+
+    local _,applyFertState=makeToggleRow(th,"🧪","Auto Fertilize",false,function(s)
+        fertEnabled=s
+        if s then
+            task.spawn(function()
+                while fertEnabled and active do
+                    local anyEnabled=typeEnabled.normal or typeEnabled.strong or typeEnabled.super
+                    if not anyEnabled then
+                        scanLbl.Text="⚠ Enable at least one fertilizer type below";task.wait(2);continue
+                    end
+                    for _,fType in ipairs(FERT_TYPES) do
+                        if not fertEnabled or not active then break end
+                        if not typeEnabled[fType.key] then continue end
+                        local entries=getEntriesForType(fType.key)
+                        if #entries==0 then
+                            scanLbl.Text=string.format("⚠ No plants set for %s",fType.label);task.wait(1);continue
+                        end
+                        if not findFertilizerTool(fType.toolName) then
+                            scanLbl.Text=string.format("⚠ %s not in backpack — skipping",fType.label);task.wait(1);continue
+                        end
+                        local applied=0
+                        for _,e in ipairs(entries) do
+                            if not fertEnabled or not active then break end
+                            scanLbl.Text=string.format("%s [%d/%d] → %s…",fType.icon,applied+1,#entries,e.plantName)
+                            if equipAndUseFertilizer(fType.toolName,e.dirt) then applied=applied+1 end
+                        end
+                        scanLbl.Text=string.format("✅ %s → %d pot(s) — waiting %ds…",fType.label,applied,fType.cooldown)
+                        for i=fType.cooldown,1,-1 do
+                            if not fertEnabled or not active then break end
+                            scanLbl.Text=string.format("⏳ [%s] %ds…",fType.label,i);task.wait(1)
+                        end
+                    end
+                    if fertEnabled and active then scanLbl.Text="🔄 Cycle done — restarting…";task.wait(1) end
+                end
+                scanLbl.Text="Add plants per fertilizer type below"
+            end)
+        else
+            scanLbl.Text="Paused"
+        end
+    end,"autoFertilize"..saveKeySuffix)
+    fertToggleApply=applyFertState
+
+    local div0=Instance.new("Frame",body);div0.Size=UDim2.new(1,0,0,1);div0.BackgroundColor3=C.lineDivider;div0.BorderSizePixel=0;div0.LayoutOrder=nextLO()
+
+    for _,fType in ipairs(FERT_TYPES) do
+        local tk=fType.key
+        local typeTogF=Instance.new("Frame",body);typeTogF.Size=UDim2.new(1,0,0,36);typeTogF.BackgroundTransparency=1;typeTogF.LayoutOrder=nextLO()
+        makeToggleRow(typeTogF,fType.icon,fType.label.."  ["..({[311]="5m 7s",[611]="10m 7s",[911]="15m 10s"})[fType.cooldown].."]",false,function(s)
+            typeEnabled[tk]=s
+            if s and hasAnyPlants() and fertToggleApply then
+                fertToggleApply(true)
+            end
+        end,"autoFert"..fType.label:gsub(" ","")..saveKeySuffix)
+
+        local addRowF=Instance.new("Frame",body)
+        addRowF.Size=UDim2.new(1,0,0,28);addRowF.BackgroundColor3=C.panel
+        addRowF.BorderSizePixel=0;addRowF.LayoutOrder=nextLO()
+        Instance.new("UICorner",addRowF).CornerRadius=UDim.new(0,5)
+        Instance.new("UIStroke",addRowF).Color=C.border
+        local addBox=Instance.new("TextBox",addRowF)
+        addBox.Size=UDim2.new(1,-56,1,0);addBox.Position=UDim2.new(0,6,0,0)
+        addBox.BackgroundTransparency=1;addBox.Text=""
+        addBox.PlaceholderText="Type Plant Name";addBox.PlaceholderColor3=C.textDim
+        addBox.TextColor3=fType.color;addBox.TextSize=FS.small
+        addBox.Font=Enum.Font.Code;addBox.ClearTextOnFocus=false;addBox.BorderSizePixel=0;addBox.ZIndex=9
+        local addBtn=Instance.new("TextButton",addRowF)
+        addBtn.Size=UDim2.new(0,48,1,-4);addBtn.Position=UDim2.new(1,-52,0,2)
+        addBtn.BackgroundColor3=C.accentDim;addBtn.Text="Add"
+        addBtn.TextColor3=C.textBright;addBtn.TextSize=FS.small
+        addBtn.Font=Enum.Font.GothamBold;addBtn.BorderSizePixel=0;addBtn.AutoButtonColor=false;addBtn.ZIndex=10
+        Instance.new("UICorner",addBtn).CornerRadius=UDim.new(0,4)
+
+        local typeScanLbl=Instance.new("TextLabel",body)
+        typeScanLbl.Size=UDim2.new(1,0,0,14);typeScanLbl.BackgroundTransparency=1;typeScanLbl.LayoutOrder=nextLO()
+        typeScanLbl.Text="";typeScanLbl.TextColor3=fType.color;typeScanLbl.TextSize=FS.small-2
+        typeScanLbl.Font=Enum.Font.Code;typeScanLbl.TextXAlignment=Enum.TextXAlignment.Left;typeScanLbl.ZIndex=9
+        Instance.new("UIPadding",typeScanLbl).PaddingLeft=UDim.new(0,4)
+
+        local listF=Instance.new("Frame",body)
+        listF.Size=UDim2.new(1,0,0,0);listF.BackgroundTransparency=1
+        listF.BorderSizePixel=0;listF.LayoutOrder=nextLO();listF.ClipsDescendants=false
+        local lLayout=Instance.new("UIListLayout",listF)
+        lLayout.SortOrder=Enum.SortOrder.LayoutOrder;lLayout.Padding=UDim.new(0,2)
+        lLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            listF.Size=UDim2.new(1,0,0,lLayout.AbsoluteContentSize.Y)
+        end)
+
+        local capturedTk=tk
+        local capturedType=fType
+
+        local function refreshList()
+            for _,ch in ipairs(listF:GetChildren()) do if not ch:IsA("UIListLayout") then ch:Destroy() end end
+            local names={};for n in pairs(fertPlants[floorNum][capturedTk]) do table.insert(names,n) end;table.sort(names)
+            for _,name in ipairs(names) do
+                local row=Instance.new("Frame",listF);row.Size=UDim2.new(1,0,0,22);row.BackgroundColor3=C.panel;row.BorderSizePixel=0;Instance.new("UICorner",row).CornerRadius=UDim.new(0,4)
+                local nLbl=Instance.new("TextLabel",row);nLbl.Size=UDim2.new(1,-28,1,0);nLbl.Position=UDim2.new(0,6,0,0);nLbl.BackgroundTransparency=1;nLbl.Text="🌱 "..name;nLbl.TextColor3=capturedType.color;nLbl.TextSize=FS.small;nLbl.Font=Enum.Font.Code;nLbl.TextXAlignment=Enum.TextXAlignment.Left;nLbl.ZIndex=9
+                local dBtn=Instance.new("TextButton",row);dBtn.Size=UDim2.new(0,20,0,16);dBtn.Position=UDim2.new(1,-24,0.5,-8);dBtn.BackgroundColor3=Color3.fromRGB(60,20,20);dBtn.Text="✕";dBtn.TextColor3=C.red;dBtn.TextSize=FS.small;dBtn.Font=Enum.Font.GothamBold;dBtn.BorderSizePixel=0;dBtn.AutoButtonColor=false;dBtn.ZIndex=10;Instance.new("UICorner",dBtn).CornerRadius=UDim.new(0,3)
+                local capN=name;dBtn.MouseButton1Click:Connect(function() fertPlants[floorNum][capturedTk][capN]=nil;refreshList() end)
+            end
+        end
+
+        local function addPlant()
+            local txt=addBox.Text:match("^%s*(.-)%s*$")
+            if not txt or #txt==0 then return end
+            fertPlants[floorNum][capturedTk][txt]=true
+            addBox.Text=""
+            refreshList()
+            task.spawn(function()
+                typeScanLbl.Text=string.format("🔍 Scanning Floor %d for '%s'…",floorNum,txt)
+                local entries=scanFloor(floorNum,txt)
+                if #entries==0 then
+                    typeScanLbl.Text=string.format("⚠ '%s' not found in Floor %d",txt,floorNum)
+                else
+                    typeScanLbl.Text=string.format("✅ '%s' → %d pot(s) found",txt,#entries)
+                end
+            end)
+            if typeEnabled[capturedTk] and fertToggleApply then
+                fertToggleApply(true)
+            end
+        end
+        addBtn.MouseButton1Click:Connect(addPlant)
+        addBox.FocusLost:Connect(function(enter) if enter then addPlant() end end)
+        addBtn.MouseEnter:Connect(function() TweenService:Create(addBtn,TweenInfo.new(0.1),{BackgroundColor3=C.accent}):Play() end)
+        addBtn.MouseLeave:Connect(function() TweenService:Create(addBtn,TweenInfo.new(0.1),{BackgroundColor3=C.accentDim}):Play() end)
+
+        if not fertRefreshCallbacks[floorNum] then fertRefreshCallbacks[floorNum]={} end
+        fertRefreshCallbacks[floorNum][tk]=refreshList
+
+        refreshList()
+
+        local divLine=Instance.new("Frame",body);divLine.Size=UDim2.new(1,0,0,1);divLine.BackgroundColor3=C.lineDivider;divLine.BorderSizePixel=0;divLine.LayoutOrder=nextLO()
+    end
+end
+
+-- ══════════════════════════════════════════════
+-- VALUE FORMATTER
+-- ══════════════════════════════════════════════
+local function formatValue(v)
+    if v>=1e15 then return string.format("%.2fQ",v/1e15)
+    elseif v>=1e12 then return string.format("%.2fT",v/1e12)
+    elseif v>=1e9  then return string.format("%.2fB",v/1e9)
+    elseif v>=1e6  then return string.format("%.2fM",v/1e6)
+    elseif v>=1e3  then return string.format("%.1fK",v/1e3)
+    else return tostring(math.floor(v)) end
+end
+
+-- ══════════════════════════════════════════════
+-- SMART COMPOSTER
+-- ══════════════════════════════════════════════
+local function runSmartComposter(floorNum,seedName,maxValue,statusLbl,enabledRef,timerLbl)
+    task.spawn(function()
+        local cycle=0
+        while enabledRef() and active do
+            cycle=cycle+1
+            local seedId=seedName.."_1_Normal"
+            local seedPrice=SEED_PRICES[seedName] or 0
+            local count,priceNote
+            if seedPrice<=0 then count=1;priceNote="unknown price"
+            elseif seedPrice>=maxValue then count=1;priceNote=string.format("%s/seed ≥ cap %s → inserting 1",formatValue(seedPrice),formatValue(maxValue))
+            else count=math.floor(maxValue/seedPrice);priceNote=string.format("%s/seed × %d = %s (cap %s)",formatValue(seedPrice),count,formatValue(count*seedPrice),formatValue(maxValue)) end
+            statusLbl.Text=string.format("⏳ Cycle %d — Inserting %d×%s  [%s]…",cycle,count,seedName,priceNote)
+            local inserted=0;local batchSize=10
+            while inserted<count and enabledRef() and active do
+                local toInsert=math.min(batchSize,count-inserted)
+                local ok,err=pcall(function() InsertSeedEvent:InvokeServer(floorNum,seedId,toInsert) end)
+                if ok then inserted=inserted+toInsert;statusLbl.Text=string.format("⏳ Cycle %d — Inserted %d / %d seeds…",cycle,inserted,count)
+                else statusLbl.Text=string.format("⚠ Insert error: %s",tostring(err));task.wait(1);break end
+                task.wait(0.3)
+            end
+            if not enabledRef() or not active then break end
+            statusLbl.Text=string.format("⏳ Cycle %d — Pulling lever…",cycle)
+            pcall(function() PullLeverEvent:InvokeServer(floorNum) end)
+            statusLbl.Text=string.format("✔ Cycle %d done — cooldown 305s…",cycle)
+            for i=305,1,-1 do
+                if not enabledRef() or not active then break end
+                statusLbl.Text=string.format("⏳ [Cycle %d] Cooldown: %ds…",cycle,i)
+                if timerLbl then timerLbl.Text=string.format(" ⏱ %ds",i) end
+                task.wait(1)
+            end
+            if timerLbl then timerLbl.Text="" end
+            if enabledRef() and active then statusLbl.Text=string.format("✅ Starting cycle %d — seed: %s",cycle+1,seedName);task.wait(0.5) end
+        end
+        statusLbl.Text="Status: Idle"
+        if timerLbl then timerLbl.Text="" end
+    end)
+end
+
+-- ══════════════════════════════════════════════
+-- HONEYCOMB / UFO HELPERS
+-- ══════════════════════════════════════════════
+local function getRuntimeHoneycombs()
+    return workspace:FindFirstChild("InteractiveEvents") and workspace.InteractiveEvents:FindFirstChild("QueenBee") and workspace.InteractiveEvents.QueenBee:FindFirstChild("RuntimeHoneycombs")
+end
+local function getNilByDebugId(debugId) for _,obj in ipairs(getnilinstances()) do if obj:GetDebugId()==debugId then return obj end end end
+local function hasHoneyTokenInBackpack()
+    local backpack=player:FindFirstChild("Backpack");local char=player.Character
+    if backpack then for _,item in ipairs(backpack:GetChildren()) do if item.Name:lower():find("honey token",1,true) then return true end end end
+    if char then for _,item in ipairs(char:GetChildren()) do if item.Name:lower():find("honey token",1,true) then return true end end end
+    return false
+end
+local function useHoneyTokenIfPresent()
+    if not hasHoneyTokenInBackpack() then return false end
+    local machineOk,machinePart=pcall(function() return workspace.InteractiveEvents.QueenBee.HoneyJarMachine["Honey Jar Machine"] end)
+    if not machineOk or not machinePart then return false end
+    local machinePos=nil
+    if machinePart:IsA("BasePart") then machinePos=machinePart.Position
+    elseif machinePart:IsA("Model") then
+        local bp=machinePart:FindFirstChildWhichIsA("BasePart");if bp then machinePos=bp.Position end
+        if not machinePos then local ok2,wp=pcall(function() return machinePart.WorldPivot.Position end);if ok2 then machinePos=wp end end
+    end
+    if not machinePos then return false end
+    teleportTo(machinePos);task.wait(0.3)
+    local VIM=game:GetService("VirtualInputManager");VIM:SendKeyEvent(true,Enum.KeyCode.E,false,game);task.wait(0.3);VIM:SendKeyEvent(false,Enum.KeyCode.E,false,game);task.wait(0.5)
+    return true
+end
+local function claimAllHoneycombs()
+    while hasHoneyTokenInBackpack() do useHoneyTokenIfPresent();task.wait(0.5) end
+    local rf=getRuntimeHoneycombs();if not rf then return end
+    local children=rf:GetChildren();if #children==0 then return end
+    for _,honeycomb in ipairs(children) do
+        if not honeycombEnabled or not active then break end
+        local pos=nil
+        if honeycomb:IsA("BasePart") then pos=honeycomb.Position else local bp=honeycomb:FindFirstChildWhichIsA("BasePart");if bp then pos=bp.Position end end
+        if not pos then local ok2,wp=pcall(function() return honeycomb.WorldPivot.Position end);if ok2 then pos=wp end end
+        if pos then teleportTo(pos) end
+        local VIM2=game:GetService("VirtualInputManager");VIM2:SendKeyEvent(true,Enum.KeyCode.E,false,game);task.wait(0.5);VIM2:SendKeyEvent(false,Enum.KeyCode.E,false,game);task.wait(0.1)
+        local nilObj=getNilByDebugId(honeycomb:GetDebugId());firesignal(HoneycombEvent.OnClientEvent,nilObj or honeycomb,player);task.wait(0.3)
+    end
+end
+local function scanUfoDrops()
+    local ie=workspace:FindFirstChild("InteractiveEvents");if not ie then return {} end
+    local drops={};local ai=ie:FindFirstChild("AlienInvasion")
+    if ai then for _,obj in ipairs(ai:GetChildren()) do if obj:IsA("BasePart") or obj:IsA("Model") then table.insert(drops,obj) end end end
+    return drops
+end
+local function claimDropList(drops)
+    local VIM=game:GetService("VirtualInputManager");local claimed=0
+    for _,drop in ipairs(drops) do
+        if not ufoEnabled or not active then break end
+        local pos=nil
+        if drop:IsA("BasePart") then pos=drop.Position elseif drop:IsA("Model") then local bp=drop:FindFirstChildWhichIsA("BasePart");if bp then pos=bp.Position end;if not pos then local ok,wp=pcall(function() return drop.WorldPivot.Position end);if ok then pos=wp end end end
+        if pos then teleportTo(pos) end
+        VIM:SendKeyEvent(true,Enum.KeyCode.E,false,game);task.wait(1);VIM:SendKeyEvent(false,Enum.KeyCode.E,false,game);task.wait(0.3)
+        claimed=claimed+1
+    end;return claimed
+end
+
+-- ══════════════════════════════════════════════
+-- ANTI-AFK
+-- ══════════════════════════════════════════════
+local VIM_AFK=game:GetService("VirtualInputManager")
+task.spawn(function()
+    while active do
+        for _=1,600 do if not active then break end;task.wait(1) end
+        if not active then break end
+        VIM_AFK:SendMouseMoveEvent(1,0,game);task.wait(0.05);VIM_AFK:SendMouseMoveEvent(-1,0,game);task.wait(0.05)
+        local ml=UserInputService:GetMouseLocation();VirtualUser:ClickButton1(ml);task.wait(0.1);VirtualUser:ClickButton1(ml)
+    end
+end)
+player.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    if speedEnabled then applySpeed(speedValue) end
+    if infiniteJumpEnabled then setInfiniteJump(true) end
+    if flyEnabled then setFly(true) end
+    if noclipEnabled then setNoclip(true) end
+end)
+
+-- ══════════════════════════════════════════════
+-- PAGE: HOME
+-- ══════════════════════════════════════════════
+local PageHome=makePage("Home");local HomeScroll,_=makeScroll(PageHome)
+makeSpacer(HomeScroll,2);makeSectionHeader(HomeScroll,"🏃","MOVEMENT");makeSpacer(HomeScroll,6)
+makeToggleRow(HomeScroll,"💨","Speed Walk",false,function(s) speedEnabled=s;if not s then applySpeed(16) end end,"speedWalk")
+makeSpacer(HomeScroll,6)
+local spIF=Instance.new("Frame",HomeScroll);spIF.Size=UDim2.new(1,0,0,44);spIF.BackgroundColor3=C.panel;spIF.BorderSizePixel=0;Instance.new("UICorner",spIF).CornerRadius=UDim.new(0,7);Instance.new("UIStroke",spIF).Color=C.border
+local spTL=Instance.new("TextLabel",spIF);spTL.Size=UDim2.new(1,-10,0,16);spTL.Position=UDim2.new(0,10,0,4);spTL.BackgroundTransparency=1;spTL.Text="🔢  Walk Speed Value  (default: 16)";spTL.TextColor3=C.textDim;spTL.TextSize=FS.small;spTL.Font=Enum.Font.Code;spTL.TextXAlignment=Enum.TextXAlignment.Left;spTL.ZIndex=9
+local spBox=Instance.new("TextBox",spIF);spBox.Size=UDim2.new(1,-16,0,20);spBox.Position=UDim2.new(0,8,0,22);spBox.BackgroundColor3=C.inputBg;spBox.BorderSizePixel=0;spBox.Text=tostring(speedValue);spBox.PlaceholderText="e.g. 50";spBox.PlaceholderColor3=C.textDim;spBox.TextColor3=C.accent;spBox.TextSize=FS.normal;spBox.Font=Enum.Font.Code;spBox.ClearTextOnFocus=false;spBox.ZIndex=10;Instance.new("UICorner",spBox).CornerRadius=UDim.new(0,5);Instance.new("UIStroke",spBox).Color=C.accentDim
+spBox:GetPropertyChangedSignal("Text"):Connect(function() local val=tonumber(spBox.Text);if val and val>0 and val<=500 then speedValue=val end end)
+saveRegistry.setSpeedValue=function(val) speedValue=val;spBox.Text=tostring(val) end
+makeSpacer(HomeScroll,8)
+local _div=Instance.new("Frame",HomeScroll);_div.Size=UDim2.new(1,0,0,1);_div.BackgroundColor3=C.lineDivider;_div.BorderSizePixel=0
+makeSpacer(HomeScroll,6)
+makeSectionHeader(HomeScroll,"🎮","ACTIONS");makeSpacer(HomeScroll,6)
+makeToggleRow(HomeScroll,"🦘","Infinite Jump",false,function(s) infiniteJumpEnabled=s;setInfiniteJump(s) end,"infiniteJump")
+makeSpacer(HomeScroll,4)
+makeToggleRow(HomeScroll,"🕊️","Fly",false,function(s) flyEnabled=s;setFly(s) end,"fly")
+makeSpacer(HomeScroll,4)
+makeToggleRow(HomeScroll,"👻","Noclip",false,function(s) noclipEnabled=s;setNoclip(s) end,"noclip")
+makeSpacer(HomeScroll,8)
+
+-- ══════════════════════════════════════════════
+-- PAGE: FARM
+-- ══════════════════════════════════════════════
+local PageFarm=makePage("Farm");local FarmScroll,_=makeScroll(PageFarm)
+makeSpacer(FarmScroll,2);makeSectionHeader(FarmScroll,"🌾","FLOORS");makeSpacer(FarmScroll,6)
+
+local function buildSmartComposterInner(inner, floorNum, cap, capLabel, saveKey, plantNameRef, setPlantRef)
+    local IF=Instance.new("Frame",inner);IF.Size=UDim2.new(1,0,0,50);IF.BackgroundColor3=C.panel;IF.BorderSizePixel=0;IF.LayoutOrder=1;Instance.new("UICorner",IF).CornerRadius=UDim.new(0,7);Instance.new("UIStroke",IF).Color=C.border
+    local LBL=Instance.new("TextLabel",IF);LBL.Size=UDim2.new(1,-10,0,18);LBL.Position=UDim2.new(0,10,0,3);LBL.BackgroundTransparency=1;LBL.Text="🌱  Plant Name  —  Cap: "..capLabel;LBL.TextColor3=C.textDim;LBL.TextSize=FS.small;LBL.Font=Enum.Font.Code;LBL.TextXAlignment=Enum.TextXAlignment.Left;LBL.ZIndex=9
+    local BOX=Instance.new("TextBox",IF);BOX.Size=UDim2.new(1,-16,0,22);BOX.Position=UDim2.new(0,8,0,24);BOX.BackgroundColor3=C.inputBg;BOX.BorderSizePixel=0;BOX.Text=plantNameRef();BOX.PlaceholderText="e.g. Durian";BOX.PlaceholderColor3=C.textDim;BOX.TextColor3=C.accent;BOX.TextSize=FS.normal;BOX.Font=Enum.Font.Code;BOX.ClearTextOnFocus=false;BOX.ZIndex=10;Instance.new("UICorner",BOX).CornerRadius=UDim.new(0,5);Instance.new("UIStroke",BOX).Color=C.accentDim
+    BOX:GetPropertyChangedSignal("Text"):Connect(function() setPlantRef(BOX.Text) end)
+    setPlantRef=function(val) setPlantRef(val);BOX.Text=val end
+    local priceLbl=Instance.new("TextLabel",inner);priceLbl.Size=UDim2.new(1,0,0,16);priceLbl.BackgroundTransparency=1;priceLbl.LayoutOrder=2;priceLbl.TextColor3=C.textDim;priceLbl.TextSize=FS.small;priceLbl.Font=Enum.Font.Code;priceLbl.TextXAlignment=Enum.TextXAlignment.Left;priceLbl.ZIndex=9;Instance.new("UIPadding",priceLbl).PaddingLeft=UDim.new(0,2)
+    local function updatePreview()
+        local name=plantNameRef();local price=SEED_PRICES[name] or 0
+        if price<=0 then priceLbl.Text=string.format("💡 %s: price unknown — will insert 1 seed",name)
+        elseif price>=cap then priceLbl.Text=string.format("💡 %s = %s ≥ cap %s → 1 seed",name,formatValue(price),formatValue(cap))
+        else local cnt=math.floor(cap/price);priceLbl.Text=string.format("💡 %s = %s → %d seeds (cap %s)",name,formatValue(price),cnt,formatValue(cap)) end
+    end
+    updatePreview()
+    BOX:GetPropertyChangedSignal("Text"):Connect(updatePreview)
+    local statusLbl=Instance.new("TextLabel",inner);statusLbl.Size=UDim2.new(1,0,0,18);statusLbl.BackgroundTransparency=1;statusLbl.LayoutOrder=3;statusLbl.Text="Status: Idle";statusLbl.TextColor3=C.textMid;statusLbl.TextSize=FS.small;statusLbl.Font=Enum.Font.Code;statusLbl.TextXAlignment=Enum.TextXAlignment.Left;statusLbl.ZIndex=9;Instance.new("UIPadding",statusLbl).PaddingLeft=UDim.new(0,2)
+    local thwrap=Instance.new("Frame",inner);thwrap.Size=UDim2.new(1,0,0,36);thwrap.BackgroundTransparency=1;thwrap.BorderSizePixel=0;thwrap.LayoutOrder=4
+    local th=Instance.new("Frame",thwrap);th.Size=UDim2.new(1,-80,1,0);th.BackgroundTransparency=1;th.BorderSizePixel=0
+    local timerLbl=Instance.new("TextLabel",thwrap);timerLbl.Size=UDim2.new(0,78,1,0);timerLbl.Position=UDim2.new(1,-78,0,0);timerLbl.BackgroundTransparency=1;timerLbl.Text="";timerLbl.TextColor3=C.accent;timerLbl.TextSize=FS.small;timerLbl.Font=Enum.Font.Code;timerLbl.TextXAlignment=Enum.TextXAlignment.Right;timerLbl.ZIndex=9
+    local smartEnabled=false
+    makeToggleRow(th,"🧠","Smart Composter (cap "..capLabel..")",false,function(s)
+        smartEnabled=s
+        if s then runSmartComposter(floorNum,plantNameRef(),cap,statusLbl,function() return smartEnabled and active end,timerLbl)
+        else statusLbl.Text="Status: Idle";timerLbl.Text="" end
+    end,saveKey)
+    return BOX,statusLbl
+end
+
+-- Floor 1
+makeCollapsibleSection(FarmScroll,"🌱","Floor 1",function(outer)
+    makeCollapsibleSection(outer,"🌿","Auto Fertilize",function(body)
+        makeFertSection(body,1,"F1")
+    end).LayoutOrder=1
+end)
+makeSpacer(FarmScroll,4)
+
+-- Floor 2
+makeCollapsibleSection(FarmScroll,"🧪","Floor 2",function(outer)
+    makeCollapsibleSection(outer,"🧠","Smart Composter (cap 200B)",function(body)
+        local box,_ = buildSmartComposterInner(body,2,200e9,"200B","autoInsertSeed2",
+            function() return FARM2_PLANT_NAME end,
+            function(v) FARM2_PLANT_NAME=v end)
+        saveRegistry.setFarm2PlantName=function(val) FARM2_PLANT_NAME=val;box.Text=val end
+    end).LayoutOrder=1
+    makeSpacer(outer,4).LayoutOrder=2
+    makeCollapsibleSection(outer,"🌿","Auto Fertilize",function(body)
+        makeFertSection(body,2,"F2")
+    end).LayoutOrder=3
+end)
+makeSpacer(FarmScroll,4)
+
+-- Floor 3
+makeCollapsibleSection(FarmScroll,"🧪","Floor 3",function(outer)
+    makeCollapsibleSection(outer,"🧠","Smart Composter (cap 30T)",function(body)
+        local box,_ = buildSmartComposterInner(body,3,30e12,"30T","autoInsertSeed3",
+            function() return FARM_PLANT_NAME end,
+            function(v) FARM_PLANT_NAME=v end)
+        saveRegistry.setFarmPlantName=function(val) FARM_PLANT_NAME=val;box.Text=val end
+    end).LayoutOrder=1
+    makeSpacer(outer,4).LayoutOrder=2
+    makeCollapsibleSection(outer,"🌿","Auto Fertilize",function(body)
+        makeFertSection(body,3,"F3")
+    end).LayoutOrder=3
+end)
+makeSpacer(FarmScroll,4)
+
+-- Floor 4
+makeCollapsibleSection(FarmScroll,"🧪","Floor 4",function(outer)
+    makeCollapsibleSection(outer,"🧠","Smart Composter (cap 30T)",function(body)
+        local box,_ = buildSmartComposterInner(body,4,300e12,"30T","autoInsertSeed4",
+            function() return FARM4_PLANT_NAME end,
+            function(v) FARM4_PLANT_NAME=v end)
+        saveRegistry.setFarm4PlantName=function(val) FARM4_PLANT_NAME=val;box.Text=val end
+    end).LayoutOrder=1
+    makeSpacer(outer,4).LayoutOrder=2
+    makeCollapsibleSection(outer,"🌿","Auto Fertilize",function(body)
+        makeFertSection(body,4,"F4")
+    end).LayoutOrder=3
+end)
+makeSpacer(FarmScroll,8)
+
+-- ══════════════════════════════════════════════
+-- PAGE: AUTO
+-- ══════════════════════════════════════════════
+local PageAuto=makePage("Auto");local AutoScroll,_=makeScroll(PageAuto)
+makeSpacer(AutoScroll,2)
+
+makeCollapsibleSection(AutoScroll,"🛒","Auto Buy",function(body)
+    local seedTogF=Instance.new("Frame",body);seedTogF.Size=UDim2.new(1,0,0,36);seedTogF.BackgroundTransparency=1;seedTogF.LayoutOrder=2
+    makeToggleRow(seedTogF,"🌱","Auto Buy Seed",false,function(s) buyEnabled=s end,"autoBuySeed")
+    local seedDd=makeRarityDropdown(body,"SeedRow_","🌾","Seed Selection",seedBuyNames,selectedSeeds);seedDd.LayoutOrder=3
+    local d1=Instance.new("Frame",body);d1.Size=UDim2.new(1,0,0,1);d1.BackgroundColor3=C.lineDivider;d1.BorderSizePixel=0;d1.LayoutOrder=4
+    local gearTogF=Instance.new("Frame",body);gearTogF.Size=UDim2.new(1,0,0,36);gearTogF.BackgroundTransparency=1;gearTogF.LayoutOrder=6
+    makeToggleRow(gearTogF,"⚙️","Auto Buy Gear",false,function(s) gearEnabled=s end,"autoBuyGear")
+    local gearDd=makePlainDropdown(body,"GearRow_","🛒","Gear Selection",GearItems,selectedGear);gearDd.LayoutOrder=7
+    local d2=Instance.new("Frame",body);d2.Size=UDim2.new(1,0,0,1);d2.BackgroundColor3=C.lineDivider;d2.BorderSizePixel=0;d2.LayoutOrder=8
+    local rarTogF=Instance.new("Frame",body);rarTogF.Size=UDim2.new(1,0,0,36);rarTogF.BackgroundTransparency=1;rarTogF.LayoutOrder=10
+    makeToggleRow(rarTogF,"✨","Auto Buy by Rarity",false,function(s) rarityBuyAllEnabled=s end,"rarityBuyAll")
+    local rlo=11
+    for _,rarity in ipairs(RARITY_ORDER) do
+        local rc=RARITY_COLORS[rarity] or C.textMid
+        local seedCount=seedsByRarity[rarity] and #seedsByRarity[rarity] or 0;if seedCount==0 then continue end
+        local rarityRow=Instance.new("TextButton",body);rarityRow.Size=UDim2.new(1,0,0,32);rarityRow.BackgroundColor3=C.panel;rarityRow.BorderSizePixel=0;rarityRow.Text="";rarityRow.AutoButtonColor=false;rarityRow.LayoutOrder=rlo;rlo=rlo+1;Instance.new("UICorner",rarityRow).CornerRadius=UDim.new(0,7)
+        local rStrip=Instance.new("Frame",rarityRow);rStrip.Size=UDim2.new(0,3,0.6,0);rStrip.Position=UDim2.new(0,0,0.2,0);rStrip.BackgroundColor3=rc;rStrip.BorderSizePixel=0;Instance.new("UICorner",rStrip).CornerRadius=UDim.new(1,0)
+        local rLbl=Instance.new("TextLabel",rarityRow);rLbl.Size=UDim2.new(1,-54,1,0);rLbl.Position=UDim2.new(0,12,0,0);rLbl.BackgroundTransparency=1;rLbl.Text="✨  "..rarity;rLbl.TextColor3=rc;rLbl.TextSize=FS.normal;rLbl.Font=Enum.Font.GothamBold;rLbl.TextXAlignment=Enum.TextXAlignment.Left;rLbl.ZIndex=9
+        local rBadge=Instance.new("TextLabel",rarityRow);rBadge.Size=UDim2.new(0,36,0,18);rBadge.Position=UDim2.new(1,-44,0.5,-9);rBadge.BackgroundColor3=C.toggleOff;rBadge.Text="OFF";rBadge.TextColor3=C.textDim;rBadge.TextSize=FS.small;rBadge.Font=Enum.Font.GothamBold;rBadge.BorderSizePixel=0;rBadge.ZIndex=9;Instance.new("UICorner",rBadge).CornerRadius=UDim.new(1,0)
+        local rOn=false;local capRarity=rarity
+        local function setRarityOn(s)
+            rOn=s
+            if s then selectedRarities[capRarity]=true;rBadge.Text="ON";TweenService:Create(rBadge,TweenInfo.new(0.15),{BackgroundColor3=C.toggleOn,TextColor3=Color3.fromRGB(0,0,0)}):Play();TweenService:Create(rarityRow,TweenInfo.new(0.1),{BackgroundColor3=C.rowHover}):Play()
+            else selectedRarities[capRarity]=nil;rBadge.Text="OFF";TweenService:Create(rBadge,TweenInfo.new(0.15),{BackgroundColor3=C.toggleOff,TextColor3=C.textDim}):Play();TweenService:Create(rarityRow,TweenInfo.new(0.1),{BackgroundColor3=C.panel}):Play() end
+        end
+        rarityRow.MouseButton1Click:Connect(function() setRarityOn(not rOn) end)
+        rarityRow.MouseEnter:Connect(function() if not rOn then TweenService:Create(rarityRow,TweenInfo.new(0.1),{BackgroundColor3=C.rowHover}):Play() end end)
+        rarityRow.MouseLeave:Connect(function() if not rOn then TweenService:Create(rarityRow,TweenInfo.new(0.1),{BackgroundColor3=C.panel}):Play() end end)
+        saveRegistry.toggles["rarityOn_"..rarity]={getState=function() return rOn end,setState=function(s) setRarityOn(s) end}
+    end
+end)
+
+makeSpacer(AutoScroll,6)
+
+makeCollapsibleSection(AutoScroll,"🎲","Auto Roll & Auto Sell",function(body)
+    local rollTogF=Instance.new("Frame",body);rollTogF.Size=UDim2.new(1,0,0,36);rollTogF.BackgroundTransparency=1;rollTogF.LayoutOrder=1
+    makeToggleRow(rollTogF,"🎲","Auto Roll",false,function(state) rollEnabled=state;task.spawn(function() while rollEnabled and active do RollEvent:FireServer();task.wait(1) end end) end,"autoRoll")
+    local d1=Instance.new("Frame",body);d1.Size=UDim2.new(1,0,0,1);d1.BackgroundColor3=C.lineDivider;d1.BorderSizePixel=0;d1.LayoutOrder=2
+    local sellTogF=Instance.new("Frame",body);sellTogF.Size=UDim2.new(1,0,0,36);sellTogF.BackgroundTransparency=1;sellTogF.LayoutOrder=3
+    makeToggleRow(sellTogF,"💰","Auto Sell",false,function(state) sellEnabled=state;task.spawn(function() while sellEnabled and active do SellEvent:FireServer();task.wait(2) end end) end,"autoSell")
+end)
+
+makeSpacer(AutoScroll,6)
+
+makeCollapsibleSection(AutoScroll,"🗑️","Auto Discard",function(body)
+    local discTogF=Instance.new("Frame",body);discTogF.Size=UDim2.new(1,0,0,36);discTogF.BackgroundTransparency=1;discTogF.LayoutOrder=1
+    makeToggleRow(discTogF,"🗑️","Auto Discard Seed",false,function(s) discardEnabled=s end,"autoDiscardSeed")
+    local discDd=makeRarityDropdown(body,"DiscardRow_","🗑️","Discard Seed Selection",discardSeedNames,selectedDiscard);discDd.LayoutOrder=2
+end)
+
+makeSpacer(AutoScroll,8)
+
+-- ══════════════════════════════════════════════
+-- PAGE: EVENT
+-- ══════════════════════════════════════════════
+local PageEvent=makePage("Event");local EventScroll,_=makeScroll(PageEvent)
+makeSpacer(EventScroll,2)
+
+-- ──────────────────────────────────────────────
+-- PLANT RUSH  (v5.23 rewrite)
+-- ──────────────────────────────────────────────
+makeCollapsibleSection(EventScroll,"🌿","Plant Rush Event",function(body)
+
+    -- Info label
+    local prioLbl=Instance.new("TextLabel",body)
+    prioLbl.Size=UDim2.new(1,0,0,36);prioLbl.BackgroundTransparency=1;prioLbl.LayoutOrder=1
+    prioLbl.Text="Priority: 🌿 Small > Medium > Tough > 👾 Boss\n"
+               .."Auto-equips TomatoShooter · forces 3rd-person · auto-aims camera"
+    prioLbl.TextColor3=C.textDim;prioLbl.TextSize=FS.small;prioLbl.Font=Enum.Font.Code
+    prioLbl.TextXAlignment=Enum.TextXAlignment.Left;prioLbl.TextWrapped=true;prioLbl.ZIndex=9
+
+    -- Status labels
+    local scanLblPR=Instance.new("TextLabel",body)
+    scanLblPR.Size=UDim2.new(1,0,0,18);scanLblPR.BackgroundTransparency=1;scanLblPR.LayoutOrder=2
+    scanLblPR.Text="Status: Idle — waiting for event"
+    scanLblPR.TextColor3=C.textMid;scanLblPR.TextSize=FS.small;scanLblPR.Font=Enum.Font.Code
+    scanLblPR.TextXAlignment=Enum.TextXAlignment.Left;scanLblPR.ZIndex=9
+    Instance.new("UIPadding",scanLblPR).PaddingLeft=UDim.new(0,4)
+
+    local targetLblPR=Instance.new("TextLabel",body)
+    targetLblPR.Size=UDim2.new(1,0,0,18);targetLblPR.BackgroundTransparency=1;targetLblPR.LayoutOrder=3
+    targetLblPR.Text=""
+    targetLblPR.TextColor3=C.accent;targetLblPR.TextSize=FS.small;targetLblPR.Font=Enum.Font.Code
+    targetLblPR.TextXAlignment=Enum.TextXAlignment.Left;targetLblPR.ZIndex=9
+    Instance.new("UIPadding",targetLblPR).PaddingLeft=UDim.new(0,4)
+
+    -- Toggle row
+    local shootF=Instance.new("Frame",body)
+    shootF.Size=UDim2.new(1,0,0,36);shootF.BackgroundTransparency=1;shootF.LayoutOrder=4
+
+    makeToggleRow(shootF,"🎯","Auto Aim (PlantRush)",false,function(s)
+        autoShootEnabled=s
+
+        if not s then
+            scanLblPR.Text="Status: Idle — waiting for event"
+            targetLblPR.Text=""
+            return
+        end
+
+        scanLblPR.Text="🔍 Starting scan loop…"
+
+        task.spawn(function()
+            -- Track whether we just equipped so we don't spam the equip call
+            local lastEquipTime = 0
+
+            while autoShootEnabled and active do
+
+                -- ── 1. Find Runtime ──────────────────────────────────
+                local ie      = workspace:FindFirstChild("InteractiveEvents")
+                local pr      = ie and ie:FindFirstChild("PlantRush")
+                local runtime = pr and pr:FindFirstChild("Runtime")
+
+                if not runtime then
+                    scanLblPR.Text  = "⏸ No PlantRush Runtime — waiting…"
+                    targetLblPR.Text = ""
+                    task.wait(0.2)
+                    continue
+                end
+
+                -- ── 2. Collect enemies, stop at highest-priority tier ──
+                local foundTier   = nil
+                local foundTarget = nil
+
+                for _, pname in ipairs(PLANT_RUSH_PRIORITY) do
+                    for _, obj in ipairs(runtime:GetChildren()) do
+                        if obj.Name == pname then
+                            local hum = obj:FindFirstChildOfClass("Humanoid")
+                            if hum and hum.Health > 0 then
+                                -- Find best root part
+                                local root = obj:FindFirstChild("HumanoidRootPart")
+                                           or obj:FindFirstChild("Torso")
+                                           or obj:FindFirstChild("UpperTorso")
+                                if not root then
+                                    for _, part in ipairs(obj:GetDescendants()) do
+                                        if part:IsA("BasePart") then root=part;break end
+                                    end
+                                end
+                                if root then
+                                    foundTier   = pname
+                                    foundTarget = {name=pname,root=root,hum=hum,
+                                                   isBoss=(pname=="Boss Plant")}
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    if foundTarget then break end
+                end
+
+                -- ── 3. No enemies ────────────────────────────────────
+                if not foundTarget then
+                    scanLblPR.Text  = "🔍 Runtime found — no alive enemies yet…"
+                    targetLblPR.Text = ""
+                    task.wait(0.2)
+                    continue
+                end
+
+                -- ── 4. Auto-equip TomatoShooter + zoom out ───────────
+                if not isHoldingTomato() then
+                    local now = tick()
+                    if now - lastEquipTime > 2 then   -- don't spam equip
+                        lastEquipTime = now
+                        equipTomatoShooter()           -- equips + zooms out
+                        task.wait(0.15)
+                    end
+                else
+                    -- Already equipped but might still be in first-person
+                    -- (can happen after first equip); nudge every ~1 s
+                    forceCameraZoomOut()
+                end
+
+                -- ── 5. Aim camera at target ───────────────────────────
+                local cam = workspace.CurrentCamera
+                if cam and foundTarget.root then
+                    local targetPos = foundTarget.root.Position
+
+                    -- Velocity lead for moving targets
+                    local vel = Vector3.zero
+                    if foundTarget.root:IsA("BasePart") then
+                        pcall(function() vel = foundTarget.root.AssemblyLinearVelocity end)
+                    end
+                    local predicted = targetPos + vel * 0.10
+
+                    local eyePos  = cam.CFrame.Position
+                    local lookDir = predicted - eyePos
+                    if lookDir.Magnitude > 0.01 then
+                        cam.CFrame = CFrame.new(eyePos, eyePos + lookDir.Unit)
+                    end
+
+                    -- Move mouse cursor to the projected screen position
+                    local screenPos, onScreen = cam:WorldToViewportPoint(predicted)
+                    if onScreen then
+                        local VIM = game:GetService("VirtualInputManager")
+                        pcall(function()
+                            VIM:SendMouseMoveEvent(
+                                math.floor(screenPos.X),
+                                math.floor(screenPos.Y),
+                                game
+                            )
+                        end)
+                    end
+                end
+
+                -- ── 6. Update HUD labels ──────────────────────────────
+                local myRoot = player.Character
+                    and player.Character:FindFirstChild("HumanoidRootPart")
+                local dist = myRoot
+                    and math.floor((foundTarget.root.Position - myRoot.Position).Magnitude)
+                    or 0
+
+                -- Count all enemies in runtime for the status bar
+                local counts = {}
+                for _, obj in ipairs(runtime:GetChildren()) do
+                    counts[obj.Name] = (counts[obj.Name] or 0) + 1
+                end
+                scanLblPR.Text = string.format(
+                    "👾 S:%d M:%d T:%d B:%d  |  Aiming → %s",
+                    counts["Small Plant"]  or 0,
+                    counts["Medium Plant"] or 0,
+                    counts["Tough Plant"]  or 0,
+                    counts["Boss Plant"]   or 0,
+                    foundTarget.name
+                )
+                targetLblPR.Text = string.format(
+                    "🎯 [%s]  HP:%.0f  Dist:%d",
+                    foundTarget.isBoss and "👾 BOSS" or "🌿 "..foundTarget.name,
+                    foundTarget.hum.Health,
+                    dist
+                )
+                targetLblPR.TextColor3 = foundTarget.isBoss
+                    and Color3.fromRGB(220,80,80)
+                    or  Color3.fromRGB(80,220,130)
+
+                task.wait(0.2)   -- 0.2 s scan + aim interval
+            end
+
+            scanLblPR.Text  = "Status: Idle — waiting for event"
+            targetLblPR.Text = ""
+        end)
+    end,"autoShoot")
+end)
+
+makeSpacer(EventScroll,6)
+
+makeCollapsibleSection(EventScroll,"🍯","Queen Bee Event",function(body)
+    local hcStatusLbl=Instance.new("TextLabel",body);hcStatusLbl.Size=UDim2.new(1,0,0,18);hcStatusLbl.BackgroundTransparency=1;hcStatusLbl.Text="Status: Idle";hcStatusLbl.TextColor3=C.textMid;hcStatusLbl.TextSize=FS.small;hcStatusLbl.Font=Enum.Font.Code;hcStatusLbl.TextXAlignment=Enum.TextXAlignment.Left;hcStatusLbl.ZIndex=9;hcStatusLbl.LayoutOrder=1;Instance.new("UIPadding",hcStatusLbl).PaddingLeft=UDim.new(0,4)
+    local hcF=Instance.new("Frame",body);hcF.Size=UDim2.new(1,0,0,36);hcF.BackgroundTransparency=1;hcF.LayoutOrder=2
+    makeToggleRow(hcF,"🍯","Auto Honeycomb",false,function(state)
+        honeycombEnabled=state
+        if state then
+            task.spawn(function()
+                while honeycombEnabled and active do
+                    if not honeycombEnabled then break end
+                    if hasHoneyTokenInBackpack() then
+                        hcStatusLbl.Text="🍯 Honey Token — using…"
+                        while hasHoneyTokenInBackpack() and honeycombEnabled and active do useHoneyTokenIfPresent();task.wait(0.8) end
+                        hcStatusLbl.Text="✅ Token(s) used — claiming honeycombs…";task.wait(0.5)
+                    else hcStatusLbl.Text="🔍 Scanning for honeycombs…" end
+                    if honeycombEnabled then claimAllHoneycombs() end
+                    if honeycombEnabled then hcStatusLbl.Text="✔ Cycle done — waiting…";task.wait(2) end
+                end
+                hcStatusLbl.Text="Status: Idle"
+            end)
+        else hcStatusLbl.Text="Status: Idle" end
+    end,"autoHoneycomb")
+    local d1=Instance.new("Frame",body);d1.Size=UDim2.new(1,0,0,1);d1.BackgroundColor3=C.lineDivider;d1.BorderSizePixel=0;d1.LayoutOrder=3
+    local honeyPotEnabled=false
+    local hpStatusLbl=Instance.new("TextLabel",body);hpStatusLbl.Size=UDim2.new(1,0,0,18);hpStatusLbl.BackgroundTransparency=1;hpStatusLbl.Text="Status: Idle — no Honey Token found";hpStatusLbl.TextColor3=C.textMid;hpStatusLbl.TextSize=FS.small;hpStatusLbl.Font=Enum.Font.Code;hpStatusLbl.TextXAlignment=Enum.TextXAlignment.Left;hpStatusLbl.ZIndex=9;hpStatusLbl.LayoutOrder=4;Instance.new("UIPadding",hpStatusLbl).PaddingLeft=UDim.new(0,4)
+    local hpF=Instance.new("Frame",body);hpF.Size=UDim2.new(1,0,0,36);hpF.BackgroundTransparency=1;hpF.LayoutOrder=5
+    makeToggleRow(hpF,"🍯","Auto Honey Pot",false,function(state)
+        honeyPotEnabled=state
+        if state then task.spawn(function()
+            while honeyPotEnabled and active do
+                local backpack=player:FindFirstChild("Backpack");local honeyToken=nil
+                if backpack then for _,item in ipairs(backpack:GetChildren()) do if item.Name:lower():find("honey token",1,true) then honeyToken=item;break end end end
+                if not honeyToken then local char=player.Character;if char then for _,item in ipairs(char:GetChildren()) do if item.Name:lower():find("honey token",1,true) then honeyToken=item;break end end end end
+                if not honeyToken then hpStatusLbl.Text="⏸ No Honey Token — standing by…";task.wait(3);continue end
+                local machineOk,machinePart=pcall(function() return workspace.InteractiveEvents.QueenBee.HoneyJarMachine["Honey Jar Machine"] end)
+                if not machineOk or not machinePart then hpStatusLbl.Text="⚠ Scanning Honey Jar Machine";task.wait(3);continue end
+                local machinePos=nil
+                if machinePart:IsA("BasePart") then machinePos=machinePart.Position
+                elseif machinePart:IsA("Model") then local bp=machinePart:FindFirstChildWhichIsA("BasePart");if bp then machinePos=bp.Position end;if not machinePos then local ok2,wp=pcall(function() return machinePart.WorldPivot.Position end);if ok2 then machinePos=wp end end end
+                if not machinePos then hpStatusLbl.Text="⚠ Could not get machine position";task.wait(3);continue end
+                hpStatusLbl.Text=string.format("🍯 Token: %s — teleporting…",honeyToken.Name)
+                teleportTo(machinePos);task.wait(0.3);hpStatusLbl.Text="🍯 Pressing E…"
+                local VIM=game:GetService("VirtualInputManager");VIM:SendKeyEvent(true,Enum.KeyCode.E,false,game);task.wait(0.3);VIM:SendKeyEvent(false,Enum.KeyCode.E,false,game);task.wait(0.5)
+                hpStatusLbl.Text=hasHoneyTokenInBackpack() and "✅ Token used — checking for more…" or "⏸ No more Honey Tokens — standing by…"
+                task.wait(2)
+            end;hpStatusLbl.Text="Status: Idle — no Honey Token found"
+        end) else hpStatusLbl.Text="Status: Idle — no Honey Token found" end
+    end,"autoHoneyPot")
+end)
+
+makeSpacer(EventScroll,6)
+
+makeCollapsibleSection(EventScroll,"🛸","Alien Invasion Event",function(body)
+    local ufoSLbl=Instance.new("TextLabel",body);ufoSLbl.Size=UDim2.new(1,0,0,18);ufoSLbl.BackgroundTransparency=1;ufoSLbl.Text="Status: Idle — waiting for event";ufoSLbl.TextColor3=C.textMid;ufoSLbl.TextSize=FS.small;ufoSLbl.Font=Enum.Font.Code;ufoSLbl.TextXAlignment=Enum.TextXAlignment.Left;ufoSLbl.ZIndex=9;ufoSLbl.LayoutOrder=1;Instance.new("UIPadding",ufoSLbl).PaddingLeft=UDim.new(0,4)
+    local ufoF=Instance.new("Frame",body);ufoF.Size=UDim2.new(1,0,0,36);ufoF.BackgroundTransparency=1;ufoF.LayoutOrder=2
+    makeToggleRow(ufoF,"🛸","Auto Claim UFO Drop",false,function(state)
+        ufoEnabled=state
+        if state then task.spawn(function()
+            while ufoEnabled and active do
+                local ie=workspace:FindFirstChild("InteractiveEvents");local ai=ie and ie:FindFirstChild("AlienInvasion")
+                if not ai then ufoSLbl.Text="⏸ No Alien Invasion event — standing by…";task.wait(5);continue end
+                local drops=scanUfoDrops()
+                if #drops==0 then ufoSLbl.Text="👾 Alien Invasion active — scanning for drops…";task.wait(2);continue end
+                ufoSLbl.Text=string.format("🛸 %d drop(s) found — claiming…",#drops)
+                local n=claimDropList(drops);if n>0 then ufoSLbl.Text=string.format("✅ Claimed %d drop(s)! Waiting for next wave…",n) end
+                task.wait(3)
+            end;ufoSLbl.Text="Status: Idle — waiting for event"
+        end) else ufoSLbl.Text="Status: Idle — waiting for event" end
+    end,"autoUfoDrop")
+end)
+makeSpacer(EventScroll,8)
+
+-- ══════════════════════════════════════════════
+-- PAGE: MISC
+-- ══════════════════════════════════════════════
+local PageMisc=makePage("Misc");local MiscScroll,_=makeScroll(PageMisc)
+makeSpacer(MiscScroll,2)
+
+makeCollapsibleSection(MiscScroll,"🎟","Redeem Codes",function(body)
+    local rStatusLbl=Instance.new("TextLabel",body);rStatusLbl.Size=UDim2.new(1,0,0,16);rStatusLbl.BackgroundTransparency=1;rStatusLbl.LayoutOrder=1;rStatusLbl.Text="";rStatusLbl.TextColor3=C.accent;rStatusLbl.TextSize=FS.small;rStatusLbl.Font=Enum.Font.Code;rStatusLbl.TextXAlignment=Enum.TextXAlignment.Left;rStatusLbl.ZIndex=9;Instance.new("UIPadding",rStatusLbl).PaddingLeft=UDim.new(0,4)
+    local rToggleF=Instance.new("Frame",body);rToggleF.Size=UDim2.new(1,0,0,36);rToggleF.BackgroundTransparency=1;rToggleF.LayoutOrder=2
+    makeToggleRow(rToggleF,"🎟","Auto Redeem Codes",false,function(s)
+        if s then task.spawn(function()
+            local ok2,fail=0,0;rStatusLbl.Text="⏳ Redeeming..."
+            for _,code in ipairs(RedeemCodes) do
+                local ok,result=pcall(function() return RedeemCodeEvent:InvokeServer(code) end)
+                if ok and result==true then ok2=ok2+1 else fail=fail+1 end
+                rStatusLbl.Text=string.format("⏳ %s — ok:%d fail:%d",code,ok2,fail);task.wait(1)
+            end;rStatusLbl.Text=string.format("✔ Done — %d redeemed, %d skipped",ok2,fail)
+        end) end
+    end,"autoRedeemCodes")
+    local d1=Instance.new("Frame",body);d1.Size=UDim2.new(1,0,0,1);d1.BackgroundColor3=C.lineDivider;d1.BorderSizePixel=0;d1.LayoutOrder=3
+    local rInfoLbl=Instance.new("TextLabel",body);rInfoLbl.Size=UDim2.new(1,0,0,16);rInfoLbl.BackgroundTransparency=1;rInfoLbl.LayoutOrder=4;rInfoLbl.Text="Known codes:";rInfoLbl.TextColor3=C.textDim;rInfoLbl.TextSize=FS.small;rInfoLbl.Font=Enum.Font.Code;rInfoLbl.TextXAlignment=Enum.TextXAlignment.Left;rInfoLbl.ZIndex=9;Instance.new("UIPadding",rInfoLbl).PaddingLeft=UDim.new(0,4)
+    local cls="";for _,c in ipairs(RedeemCodes) do cls=cls.."  • "..c.."\n" end
+    local cListLbl=Instance.new("TextLabel",body);cListLbl.Size=UDim2.new(1,0,0,FS.small*#RedeemCodes+4);cListLbl.BackgroundTransparency=1;cListLbl.LayoutOrder=5;cListLbl.Text=cls;cListLbl.TextColor3=C.accent;cListLbl.TextSize=FS.small;cListLbl.Font=Enum.Font.Code;cListLbl.TextXAlignment=Enum.TextXAlignment.Left;cListLbl.TextYAlignment=Enum.TextYAlignment.Top;cListLbl.ZIndex=9;Instance.new("UIPadding",cListLbl).PaddingLeft=UDim.new(0,4)
+end)
+makeSpacer(MiscScroll,8)
+
+-- ══════════════════════════════════════════════
+-- PAGE: SETTINGS
+-- ══════════════════════════════════════════════
+local PageSettings=makePage("Settings");local SettingsScroll,_=makeScroll(PageSettings)
+makeSectionHeader(SettingsScroll,"⌨","KEYBIND");makeSpacer(SettingsScroll,4)
+makeToggleRow(SettingsScroll,"🔑","Keybind Toggle UI",true,function(s) keybindEnabled=s end,"keybindToggle")
+makeSpacer(SettingsScroll,6)
+local kbRow=Instance.new("Frame",SettingsScroll);kbRow.Size=UDim2.new(1,0,0,36);kbRow.BackgroundColor3=C.panel;kbRow.BorderSizePixel=0;Instance.new("UICorner",kbRow).CornerRadius=UDim.new(0,7)
+local kbLbl=Instance.new("TextLabel",kbRow);kbLbl.Size=UDim2.new(0.55,0,1,0);kbLbl.Position=UDim2.new(0,10,0,0);kbLbl.BackgroundTransparency=1;kbLbl.Text="Show / Hide Key";kbLbl.TextColor3=C.textMid;kbLbl.TextSize=FS.normal;kbLbl.Font=Enum.Font.Gotham;kbLbl.TextXAlignment=Enum.TextXAlignment.Left;kbLbl.ZIndex=9
+local kbBadge=Instance.new("TextButton",kbRow);kbBadge.Size=UDim2.new(0,80,0,22);kbBadge.Position=UDim2.new(1,-88,0.5,-11);kbBadge.BackgroundColor3=C.inputBg;kbBadge.AutoButtonColor=false;kbBadge.Text="[ "..currentKeybind.Name.." ]";kbBadge.TextColor3=C.accent;kbBadge.TextSize=FS.small;kbBadge.Font=Enum.Font.Code;kbBadge.BorderSizePixel=0;kbBadge.ZIndex=10;Instance.new("UICorner",kbBadge).CornerRadius=UDim.new(0,5)
+local kbs=Instance.new("UIStroke",kbBadge);kbs.Color=C.border;kbs.Thickness=1
+saveRegistry.setKeybind=function(enum) currentKeybind=enum;kbBadge.Text="[ "..enum.Name.." ]" end
+kbBadge.MouseButton1Click:Connect(function()
+    if listeningForKey then return end
+    listeningForKey=true;kbBadge.Text="[ ... ]";kbBadge.TextColor3=C.textDim
+    local conn;conn=UserInputService.InputBegan:Connect(function(input,gpe)
+        if input.UserInputType==Enum.UserInputType.Keyboard then
+            currentKeybind=input.KeyCode;kbBadge.Text="[ "..input.KeyCode.Name.." ]";kbBadge.TextColor3=C.accent;kbs.Color=C.border;listeningForKey=false;conn:Disconnect()
+        end
+    end)
+end)
+makeSpacer(SettingsScroll,8)
+local _sdiv=Instance.new("Frame",SettingsScroll);_sdiv.Size=UDim2.new(1,0,0,1);_sdiv.BackgroundColor3=C.lineDivider;_sdiv.BorderSizePixel=0
+makeSpacer(SettingsScroll,6)
+makeSectionHeader(SettingsScroll,"💾","SAVE SETTINGS");makeSpacer(SettingsScroll,4)
+local saveInfoLbl=Instance.new("TextLabel",SettingsScroll);saveInfoLbl.Size=UDim2.new(1,0,0,30);saveInfoLbl.BackgroundTransparency=1;saveInfoLbl.Text="Saves all toggles, selections, and custom lists.\nRestored automatically on next execution.";saveInfoLbl.TextColor3=C.textDim;saveInfoLbl.TextSize=FS.small;saveInfoLbl.Font=Enum.Font.Code;saveInfoLbl.TextXAlignment=Enum.TextXAlignment.Left;saveInfoLbl.TextYAlignment=Enum.TextYAlignment.Top;saveInfoLbl.TextWrapped=true;saveInfoLbl.ZIndex=9;Instance.new("UIPadding",saveInfoLbl).PaddingLeft=UDim.new(0,4)
+makeSpacer(SettingsScroll,6)
+local saveBtnC=Instance.new("Frame",SettingsScroll);saveBtnC.Size=UDim2.new(1,0,0,36);saveBtnC.BackgroundTransparency=1;saveBtnC.BorderSizePixel=0
+local saveBtn=Instance.new("TextButton",saveBtnC);saveBtn.Size=UDim2.new(0,140,0,30);saveBtn.Position=UDim2.new(0,0,0.5,-15);saveBtn.BackgroundColor3=Color3.fromRGB(22,50,22);saveBtn.Text="💾  Save Settings";saveBtn.TextColor3=C.accent;saveBtn.TextSize=FS.normal;saveBtn.Font=Enum.Font.GothamBold;saveBtn.AutoButtonColor=false;saveBtn.BorderSizePixel=0;saveBtn.ZIndex=10;Instance.new("UICorner",saveBtn).CornerRadius=UDim.new(0,7)
+local sbStr=Instance.new("UIStroke",saveBtn);sbStr.Color=C.border;sbStr.Thickness=1
+saveBtn.MouseEnter:Connect(function() TweenService:Create(saveBtn,TweenInfo.new(0.1),{BackgroundColor3=Color3.fromRGB(35,75,35)}):Play();TweenService:Create(sbStr,TweenInfo.new(0.1),{Color=C.accent}):Play() end)
+saveBtn.MouseLeave:Connect(function() TweenService:Create(saveBtn,TweenInfo.new(0.1),{BackgroundColor3=Color3.fromRGB(22,50,22)}):Play();TweenService:Create(sbStr,TweenInfo.new(0.1),{Color=C.border}):Play() end)
+saveBtn.MouseButton1Click:Connect(function()
+    TweenService:Create(saveBtn,TweenInfo.new(0.08),{BackgroundColor3=C.accentDim}):Play()
+    task.delay(0.12,function() TweenService:Create(saveBtn,TweenInfo.new(0.08),{BackgroundColor3=Color3.fromRGB(22,50,22)}):Play() end)
+    doSave()
+end)
+makeSpacer(SettingsScroll,8)
+local _sdiv2=Instance.new("Frame",SettingsScroll);_sdiv2.Size=UDim2.new(1,0,0,1);_sdiv2.BackgroundColor3=C.lineDivider;_sdiv2.BorderSizePixel=0
+makeSpacer(SettingsScroll,6)
+makeSectionHeader(SettingsScroll,"ℹ","INFO");makeSpacer(SettingsScroll,4)
+local infoLbl=Instance.new("TextLabel",SettingsScroll);infoLbl.Size=UDim2.new(1,0,0,30);infoLbl.BackgroundTransparency=1;infoLbl.Text="Please support by joining our Discord.";infoLbl.TextColor3=C.textDim;infoLbl.TextSize=FS.normal;infoLbl.Font=Enum.Font.Code;infoLbl.TextXAlignment=Enum.TextXAlignment.Left;infoLbl.TextYAlignment=Enum.TextYAlignment.Top;infoLbl.TextWrapped=true;infoLbl.ZIndex=9;Instance.new("UIPadding",infoLbl).PaddingLeft=UDim.new(0,4)
+makeSpacer(SettingsScroll,6)
+local dBtnC=Instance.new("Frame",SettingsScroll);dBtnC.Size=UDim2.new(1,0,0,36);dBtnC.BackgroundTransparency=1;dBtnC.BorderSizePixel=0
+local discordBtn=Instance.new("TextButton",dBtnC);discordBtn.Size=UDim2.new(0,190,0,30);discordBtn.Position=UDim2.new(0,0,0.5,-15);discordBtn.BackgroundColor3=Color3.fromRGB(14,30,60);discordBtn.Text="🔗  Copy Discord Link";discordBtn.TextColor3=Color3.fromRGB(88,170,255);discordBtn.TextSize=FS.normal;discordBtn.Font=Enum.Font.GothamBold;discordBtn.AutoButtonColor=false;discordBtn.BorderSizePixel=0;discordBtn.ZIndex=10;Instance.new("UICorner",discordBtn).CornerRadius=UDim.new(0,7)
+local dStr=Instance.new("UIStroke",discordBtn);dStr.Color=Color3.fromRGB(40,80,160);dStr.Thickness=1
+discordBtn.MouseEnter:Connect(function() TweenService:Create(discordBtn,TweenInfo.new(0.1),{BackgroundColor3=Color3.fromRGB(22,48,90)}):Play();TweenService:Create(dStr,TweenInfo.new(0.1),{Color=Color3.fromRGB(88,170,255)}):Play() end)
+discordBtn.MouseLeave:Connect(function() TweenService:Create(discordBtn,TweenInfo.new(0.1),{BackgroundColor3=Color3.fromRGB(14,30,60)}):Play();TweenService:Create(dStr,TweenInfo.new(0.1),{Color=Color3.fromRGB(40,80,160)}):Play();discordBtn.Text="🔗  Copy Discord Link";discordBtn.TextColor3=Color3.fromRGB(88,170,255) end)
+discordBtn.MouseButton1Click:Connect(function()
+    setclipboard("https://discord.gg/NWmthtPyv9");discordBtn.Text="✔  Copied!";discordBtn.TextColor3=C.accent
+    TweenService:Create(discordBtn,TweenInfo.new(0.08),{BackgroundColor3=C.accentDim}):Play()
+    task.delay(2,function() discordBtn.Text="🔗  Copy Discord Link";discordBtn.TextColor3=Color3.fromRGB(88,170,255);TweenService:Create(discordBtn,TweenInfo.new(0.1),{BackgroundColor3=Color3.fromRGB(14,30,60)}):Play() end)
+end)
+makeSpacer(SettingsScroll,8)
+
+-- ══════════════════════════════════════════════
+-- RESIZE HANDLE
+-- ══════════════════════════════════════════════
+local ResizeHandle=Instance.new("TextButton",Frame)
+ResizeHandle.Size=UDim2.new(0,18,0,18);ResizeHandle.Position=UDim2.new(1,-18,1,-18)
+ResizeHandle.BackgroundTransparency=1;ResizeHandle.Text=""
+ResizeHandle.AutoButtonColor=false;ResizeHandle.ZIndex=100
+
+local dragging,dragStart,dragFrameStart=false,Vector2.new(),UDim2.new()
+TitleBar.InputBegan:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true;dragStart=Vector2.new(input.Position.X,input.Position.Y);local ap=Frame.AbsolutePosition;dragFrameStart=UDim2.new(0,ap.X,0,ap.Y) end end)
+TitleBar.InputEnded:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
+local resizing,resizeStart,resizeStartSz=false,Vector2.new(),Vector2.new()
+ResizeHandle.InputBegan:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 then resizing=true;resizeStart=Vector2.new(input.Position.X,input.Position.Y);resizeStartSz=Vector2.new(Frame.AbsoluteSize.X,Frame.AbsoluteSize.Y) end end)
+ResizeHandle.InputEnded:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 then resizing=false end end)
+UserInputService.InputChanged:Connect(function(input)
+    if input.UserInputType~=Enum.UserInputType.MouseMovement then return end
+    local p=Vector2.new(input.Position.X,input.Position.Y)
+    if dragging then local d=p-dragStart;Frame.Position=UDim2.new(0,dragFrameStart.X.Offset+d.X,0,dragFrameStart.Y.Offset+d.Y) end
+    if resizing then local d=p-resizeStart;Frame.Size=UDim2.new(0,math.max(MIN_W,resizeStartSz.X+d.X),0,math.max(MIN_H,resizeStartSz.Y+d.Y)) end
+end)
+UserInputService.InputEnded:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false;resizing=false end end)
+
+-- ══════════════════════════════════════════════
+-- SHOW / HIDE UI
+-- ══════════════════════════════════════════════
+local function showUI() Frame.Visible=true;FloatBtn.Visible=false end
+local function hideUI()
+    Frame.Visible=false;FloatBtn.Visible=true
+    local char=player.Character;if char then local hum=char:FindFirstChildOfClass("Humanoid");if hum then hum.WalkSpeed=25 end end
+end
+MinBtn.MouseButton1Click:Connect(hideUI);FloatBtn.MouseButton1Click:Connect(showUI)
+UserInputService.InputBegan:Connect(function(input,gpe)
+    if gpe then return end
+    if not listeningForKey and keybindEnabled and input.KeyCode==currentKeybind then
+        if Frame.Visible then hideUI() else showUI() end
+    end
+end)
+
+local function stopAll()
+    active=false;rollEnabled=false;sellEnabled=false;buyEnabled=false;gearEnabled=false
+    honeycombEnabled=false;ufoEnabled=false;discardEnabled=false;farmEnabled=false;farm2Enabled=false
+    speedEnabled=false;infiniteJumpEnabled=false;flyEnabled=false;noclipEnabled=false
+    autoShootEnabled=false;autoEquipTomato=false;rarityBuyAllEnabled=false
+    setInfiniteJump(false);setFly(false);setNoclip(false)
+    selectedSeeds={};selectedGear={};selectedDiscard={};selectedRarities={}
+    for _,fn in ipairs(forceOffList) do fn() end
+    local char=player.Character;if char then local hum=char:FindFirstChildOfClass("Humanoid");if hum then hum.WalkSpeed=25 end end
+end
+CloseBtn.MouseButton1Click:Connect(function() stopAll();Frame.Visible=false;FloatBtn.Visible=false end)
+
+-- ══════════════════════════════════════════════
+-- BACKGROUND LOOPS
+-- ══════════════════════════════════════════════
+task.spawn(function()
+    while true do
+        task.wait(0.2);if not active then continue end
+        if buyEnabled then
+            for _,seed in ipairs(Seeds) do
+                if not selectedSeeds[seed.name] then continue end
+                local obj=seed.find();if obj then local part=obj:FindFirstChild(seed.child);if part then local prompt=part:FindFirstChild(seed.prompt);if prompt then fireproximityprompt(prompt) end end end
+            end
+        end
+        if rarityBuyAllEnabled then
+            for _,seed in ipairs(Seeds) do
+                if not selectedRarities[seed.rarity] then continue end
+                local obj=seed.find();if obj then local part=obj:FindFirstChild(seed.child);if part then local prompt=part:FindFirstChild(seed.prompt);if prompt then fireproximityprompt(prompt) end end end
+            end
+        end
+    end
+end)
+task.spawn(function()
+    while true do
+        task.wait(0.1);if not gearEnabled or not active then continue end
+        for gearName in pairs(selectedGear) do
+            if not gearEnabled or not active then break end
+            pcall(function() GearEvent:InvokeServer(gearName) end);task.wait(3)
+        end
+    end
+end)
+task.spawn(function()
+    local char=player.Character or player.CharacterAdded:Wait();local humanoid=char:WaitForChild("Humanoid")
+    player.CharacterAdded:Connect(function(c) char=c;humanoid=c:WaitForChild("Humanoid") end)
+    while true do
+        task.wait(0.5);if not discardEnabled or not active then continue end
+        local backpack=player:FindFirstChild("Backpack");if not backpack then continue end
+        for seedEntryName in pairs(selectedDiscard) do
+            if not discardEnabled or not active then break end
+            local plainName=seedPlainNames[seedEntryName];if not plainName then continue end
+            local toolName=plainName.." Seed"
+            local tool=backpack:FindFirstChild(toolName) or char:FindFirstChild(toolName)
+            if not tool then continue end
+            humanoid:EquipTool(tool);task.wait(0.35);DiscardEvent:FireServer();task.wait(0.35)
+        end
+    end
+end)
+
+doLoad()
+setNavActive("Home")

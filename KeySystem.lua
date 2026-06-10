@@ -344,8 +344,9 @@ end
 
 local function loadMain(key)
 	saveKey(key)
-
 	getgenv().QH_KeyVerified = true
+	_G.QH_KeyVerified = true
+	shared.QH_KeyVerified = true
 	LockIcon.Text    = "🔓"
 	SubmitBtn.Active = false
 	LootBtn.Active   = false
@@ -365,11 +366,12 @@ local function loadMain(key)
 		}
 	):Play()
 	task.delay(0.5, function()
-    ScreenGui:Destroy()
-    loadstring(game:HttpGet(LOADER_URL))()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua"))()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua"))()
-end)
+		ScreenGui:Destroy()
+		loadstring(game:HttpGet(LOADER_URL))()
+		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua"))()
+		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua"))()
+	end)
+end
 
 -- ── UNLOCK LOGIC ──────────────────────────────────────────────────────────
 local function onSubmit()

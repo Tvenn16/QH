@@ -368,8 +368,18 @@ local function loadMain(key)
 	task.delay(0.5, function()
 		ScreenGui:Destroy()
 		loadstring(game:HttpGet(LOADER_URL))()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua"))()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua"))()
+
+		local Games = {
+			[10039338037] = "https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua",
+			[7395930870]  = "https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua",
+		}
+
+		local scriptUrl = Games[game.PlaceId]
+		if scriptUrl then
+			loadstring(game:HttpGet(scriptUrl))()
+		else
+			warn("No script found for PlaceId: " .. game.PlaceId)
+		end
 	end)
 end
 

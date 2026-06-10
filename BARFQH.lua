@@ -1,8 +1,8 @@
--- Check key verification via file flag
-if not pcall(function()
-    local flag = readfile("BARFQH_verified.txt")
-    assert(flag == "true")
-end) then
+print("BARFQH START")
+local _verified = pcall(function()
+    assert(readfile("BARFQH_verified.txt") == "true")
+end)
+if not _verified then
     warn("Loading KeySystem")
     return loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/KeySystem.lua"))()
 end

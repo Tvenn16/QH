@@ -345,7 +345,6 @@ end
 local function loadMain(key)
 	saveKey(key)
 
-	-- Session verification
 	getgenv().QH_KeyVerified = true
 	LockIcon.Text    = "🔓"
 	SubmitBtn.Active = false
@@ -367,7 +366,7 @@ local function loadMain(key)
 	):Play()
 	task.delay(0.5, function()
 		ScreenGui:Destroy()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua"))()
+		loadstring(game:HttpGet(LOADER_URL))()
 	end)
 end
 

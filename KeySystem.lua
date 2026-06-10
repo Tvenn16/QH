@@ -85,7 +85,7 @@ if cachedKey then
 	end
 end
 -- ─────────────────────────────────────────────────────────────────────────
-
+local pgui = player:WaitForChild("PlayerGui")
 if pgui:FindFirstChild("QUANTUMH_KeySystem") then
 	pgui.QUANTUMH_KeySystem:Destroy()
 end

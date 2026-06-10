@@ -65,12 +65,27 @@ local function validateWithServer(key)
 end
 
 -- ── CHECK CACHE FIRST ─────────────────────────────────────────────────────
+-- ── CHECK CACHE FIRST ─────────────────────────────────────────────────────
 local cachedKey = loadCachedKey()
 if cachedKey then
 	local result = validateWithServer(cachedKey)
 	if result == "OK" then
 		-- Key still valid — skip UI entirely
+		getgenv().QH_KeyVerified = true
+		_G.QH_KeyVerified = true
+		shared.QH_KeyVerified = true
 		loadstring(game:HttpGet(LOADER_URL))()
+
+		local Games = {
+			[10039338037] = "https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua",
+			[7395930870]  = "https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua",
+		}
+		local scriptUrl = Games[game.PlaceId]
+		if scriptUrl then
+			loadstring(game:HttpGet(scriptUrl))()
+		else
+			warn("No script found for PlaceId: " .. game.PlaceId)
+		end
 		return
 	else
 		-- Key invalid/expired — delete cache and show UI

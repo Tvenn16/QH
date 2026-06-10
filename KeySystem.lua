@@ -344,15 +344,33 @@ end
 
 local function loadMain(key)
 	saveKey(key)
+
+	-- Session verification
+	getgenv().QH_KeyVerified = true
 	LockIcon.Text    = "🔓"
 	SubmitBtn.Active = false
 	LootBtn.Active   = false
-	TweenService:Create(Card, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{Position = UDim2.new(0.5,-CARD_W/2,1.5,-CARD_H/2), BackgroundTransparency=1}):Play()
-	TweenService:Create(Dimmer, TweenInfo.new(0.5), {BackgroundTransparency=1}):Play()
+	TweenService:Create(
+		Card,
+		TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{
+			Position = UDim2.new(0.5,-CARD_W/2,1.5,-CARD_H/2),
+			BackgroundTransparency = 1
+		}
+	):Play()
+	TweenService:Create(
+		Dimmer,
+		TweenInfo.new(0.5),
+		{
+			BackgroundTransparency = 1
+		}
+	):Play()
+
 	task.delay(0.5, function()
 		ScreenGui:Destroy()
-		loadstring(game:HttpGet(LOADER_URL))()
+
+		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua"))()
+		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua"))()	
 	end)
 end
 

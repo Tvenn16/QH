@@ -19,7 +19,7 @@ local LOADER_URL   = "https://raw.githubusercontent.com/Tvenn16/QH/main/Loader.l
 local LOOTLABS_URL = "https://lootdest.org/s?GfNWObxH"
 local TITLE_TEXT   = "QUANTUMH "
 local SUBTITLE     = "Key System"
-local CACHE_FILE   = "BARFQH_key.txt"   -- saved in executor's workspace folder
+local CACHE_FILE   = "quantumh_key.txt"   -- saved in executor's workspace folder
 local KEY_DURATION = 60 * 60 * 24       -- 24 hours in seconds (change as needed)
 -- ─────────────────────────────────────────────────────────────────────────
 
@@ -86,13 +86,12 @@ if cachedKey then
 end
 -- ─────────────────────────────────────────────────────────────────────────
 
-local pgui = player:WaitForChild("PlayerGui")
-if pgui:FindFirstChild("BARFQH_KeySystem") then
-	pgui.BARFQH_KeySystem:Destroy()
+if pgui:FindFirstChild("QUANTUMH_KeySystem") then
+	pgui.QUANTUMH_KeySystem:Destroy()
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name           = "QUANTUMH - KEY SYSTEM"
+ScreenGui.Name = "QUANTUMH_KeySystem"
 ScreenGui.ResetOnSpawn   = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 ScreenGui.DisplayOrder   = 200
@@ -170,12 +169,12 @@ UserInputService.InputEnded:Connect(onDragEnd)
 
 local TIcon = Instance.new("TextLabel", TitleBar)
 TIcon.Size = UDim2.new(0,30,1,0); TIcon.Position = UDim2.new(0,10,0,0)
-TIcon.BackgroundTransparency = 1; TIcon.Text = "🌿"; TIcon.TextSize = 17
+TIcon.BackgroundTransparency = 1; TIcon.Text = "⚛️"; TIcon.TextSize = 17
 TIcon.Font = Enum.Font.GothamBold; TIcon.ZIndex = 12
 
 local TLabel = Instance.new("TextLabel", TitleBar)
 TLabel.Size = UDim2.new(1,-80,1,0); TLabel.Position = UDim2.new(0,42,0,0)
-TLabel.BackgroundTransparency = 1; TLabel.Text = TITLE_TEXT .. "  —  " .. SUBTITLE
+TLabel.BackgroundTransparency = 1; TLabel.Text = "QUANTUMH  -  KEY SYSTEM"
 TLabel.TextColor3 = C.textBright; TLabel.TextSize = 15
 TLabel.Font = Enum.Font.GothamBold; TLabel.TextXAlignment = Enum.TextXAlignment.Left
 TLabel.ZIndex = 12

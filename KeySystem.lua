@@ -65,7 +65,6 @@ local function validateWithServer(key)
 end
 
 -- ── CHECK CACHE FIRST ─────────────────────────────────────────────────────
--- ── CHECK CACHE FIRST ─────────────────────────────────────────────────────
 local cachedKey = loadCachedKey()
 if cachedKey then
 	local result = validateWithServer(cachedKey)
@@ -74,8 +73,8 @@ if cachedKey then
 		getgenv().QH_KeyVerified = true
 		_G.QH_KeyVerified = true
 		shared.QH_KeyVerified = true
+		pcall(function() writefile("BARFQH_verified.txt", "true") end)
 		loadstring(game:HttpGet(LOADER_URL))()
-
 		local Games = {
 			[10039338037] = "https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua",
 			[7395930870]  = "https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua",
@@ -90,6 +89,7 @@ if cachedKey then
 	else
 		-- Key invalid/expired — delete cache and show UI
 		pcall(function() delfile(CACHE_FILE) end)
+		pcall(function() delfile("BARFQH_verified.txt") end)
 	end
 end
 -- ─────────────────────────────────────────────────────────────────────────
@@ -362,6 +362,7 @@ local function loadMain(key)
 	getgenv().QH_KeyVerified = true
 	_G.QH_KeyVerified = true
 	shared.QH_KeyVerified = true
+	pcall(function() writefile("BARFQH_verified.txt", "true") end)  -- ADD THIS
 	LockIcon.Text    = "🔓"
 	SubmitBtn.Active = false
 	LootBtn.Active   = false

@@ -1,10 +1,3 @@
-print("BARFQH START")
-print("QH_KeyVerified =", getgenv().QH_KeyVerified)
-
-if not getgenv().QH_KeyVerified then
-    warn("Loading KeySystem...")
-    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/KeySystem.lua"))()
-end
 
 print("Passed Key Check")
 -- Protected by wYnFuscate: https://wynfuscate.com | https://discord.gg/Z5xQ47Mbnd

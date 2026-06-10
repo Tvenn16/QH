@@ -347,11 +347,9 @@ local function loadMain(key)
 
 	-- Session verification
 	getgenv().QH_KeyVerified = true
-
 	LockIcon.Text    = "🔓"
 	SubmitBtn.Active = false
 	LootBtn.Active   = false
-
 	TweenService:Create(
 		Card,
 		TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),

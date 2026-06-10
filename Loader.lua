@@ -30,7 +30,7 @@ if not URL then
     lbl.Size               = UDim2.new(1,-20,1,0)
     lbl.Position           = UDim2.new(0,10,0,0)
     lbl.BackgroundTransparency = 1
-    lbl.Text               = "🌿 BARF QH\nThis game is not supported yet."
+    lbl.Text               = "QUANTUMH \nThis game is not supported yet."
     lbl.TextColor3         = Color3.fromRGB(210,255,210)
     lbl.TextSize           = 14
     lbl.Font               = Enum.Font.GothamBold

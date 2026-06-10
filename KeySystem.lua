@@ -369,7 +369,7 @@ local function loadMain(key)
 	):Play()
 	task.delay(0.5, function()
 		ScreenGui:Destroy()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua"))()
+		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua"))(),
 		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua"))()	
 	end)
 end

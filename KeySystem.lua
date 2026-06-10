@@ -92,7 +92,7 @@ if pgui:FindFirstChild("BARFQH_KeySystem") then
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name           = "BARFQH_KeySystem"
+ScreenGui.Name           = "QUANTUMH - KEY SYSTEM"
 ScreenGui.ResetOnSpawn   = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 ScreenGui.DisplayOrder   = 200

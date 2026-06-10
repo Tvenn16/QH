@@ -1,6 +1,8 @@
-print("LEMONSQH START")
-print("QH_KeyVerified =", shared.QH_KeyVerified)
-if not shared.QH_KeyVerified then
+-- Check key verification via file flag
+if not pcall(function()
+    local flag = readfile("BARFQH_verified.txt")
+    assert(flag == "true")
+end) then
     warn("Loading KeySystem")
     return loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/KeySystem.lua"))()
 end

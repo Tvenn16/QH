@@ -1,6 +1,10 @@
-if not getgenv().QH_KeyVerified then
-	return loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/KeySystem.lua"))()
+print("LEMONSQH START")
+print("QH_KeyVerified =", shared.QH_KeyVerified)
+if not shared.QH_KeyVerified then
+    warn("Loading KeySystem")
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/KeySystem.lua"))()
 end
+print("Passed Key Check")
 
 
 --[[ v1.0.0 https://wearedevs.net/obfuscator ]] 

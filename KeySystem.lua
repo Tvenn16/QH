@@ -1,12 +1,3 @@
-change the header ui of key system to QUANTUMH  - KEY SYSTEM
-
-print("KeySystem started")
-
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-
-print("Player:", player and player.Name)
-
 -- BARF QH Key System
 -- Place this at the TOP of your script, before any other code.
 
@@ -19,9 +10,9 @@ local player = Players.LocalPlayer
 local KEY_API      = "https://script.google.com/macros/s/AKfycbwB9VnGnPdNHz8Fl0flOFC-AGa5y_YBTz7IH6_XR1yrXzoRf25tld9DIHwXsCgyvqB7hw/exec"
 local LOADER_URL   = "https://raw.githubusercontent.com/Tvenn16/QH/main/Loader.lua"
 local LOOTLABS_URL = "https://lootdest.org/s?GfNWObxH"
-local TITLE_TEXT   = "QUANTUMH "
+local TITLE_TEXT   = "BARF QH"
 local SUBTITLE     = "Key System"
-local CACHE_FILE   = "quantumh_key.txt"   -- saved in executor's workspace folder
+local CACHE_FILE   = "BARFQH_key.txt"   -- saved in executor's workspace folder
 local KEY_DURATION = 60 * 60 * 24       -- 24 hours in seconds (change as needed)
 -- ─────────────────────────────────────────────────────────────────────────
 
@@ -94,7 +85,7 @@ if pgui:FindFirstChild("BARFQH_KeySystem") then
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name           = "QUANTUMH - KEY SYSTEM"
+ScreenGui.Name           = "BARFQH_KeySystem"
 ScreenGui.ResetOnSpawn   = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 ScreenGui.DisplayOrder   = 200
@@ -353,33 +344,15 @@ end
 
 local function loadMain(key)
 	saveKey(key)
-
-	-- Session verification
-	getgenv().QH_KeyVerified = true
 	LockIcon.Text    = "🔓"
 	SubmitBtn.Active = false
 	LootBtn.Active   = false
-	TweenService:Create(
-		Card,
-		TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{
-			Position = UDim2.new(0.5,-CARD_W/2,1.5,-CARD_H/2),
-			BackgroundTransparency = 1
-		}
-	):Play()
-	TweenService:Create(
-		Dimmer,
-		TweenInfo.new(0.5),
-		{
-			BackgroundTransparency = 1
-		}
-	):Play()
-
+	TweenService:Create(Card, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{Position = UDim2.new(0.5,-CARD_W/2,1.5,-CARD_H/2), BackgroundTransparency=1}):Play()
+	TweenService:Create(Dimmer, TweenInfo.new(0.5), {BackgroundTransparency=1}):Play()
 	task.delay(0.5, function()
 		ScreenGui:Destroy()
-
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/BARFQH.lua"))()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/Tvenn16/QH/main/LEMONSQH.lua"))()	
+		loadstring(game:HttpGet(LOADER_URL))()
 	end)
 end
 

@@ -9,7 +9,7 @@ local player = Players.LocalPlayer
 -- ── CONFIG ───────────────────────────────────────────────────────────────
 local KEY_API      = "https://script.google.com/macros/s/AKfycbwB9VnGnPdNHz8Fl0flOFC-AGa5y_YBTz7IH6_XR1yrXzoRf25tld9DIHwXsCgyvqB7hw/exec"
 local LOADER_URL   = "https://raw.githubusercontent.com/Tvenn16/QH/main/Loader.lua"
-local LOOTLABS_URL = "https://lootdest.org/s?GfNWObxH"
+local LOOTLABS_URL = "https://discord.gg/7ezA6JmKqC"
 local TITLE_TEXT   = "BARF QH"
 local SUBTITLE     = "Key System"
 local CACHE_FILE   = "BARFQH_key.txt"   -- saved in executor's workspace folder
@@ -255,7 +255,7 @@ end)
 local LootBtn = Instance.new("TextButton", Card)
 LootBtn.Size = UDim2.new(1,-40,0,36); LootBtn.Position = UDim2.new(0,20,0,230)
 LootBtn.BackgroundColor3 = C.lootlabsDim; LootBtn.BorderSizePixel = 0
-LootBtn.Text = "🔑  Get Key  (Lootlabs)"; LootBtn.TextColor3 = Color3.fromRGB(255,220,150)
+LootBtn.Text = "🔑  Get Key  (Discord)"; LootBtn.TextColor3 = Color3.fromRGB(255,220,150)
 LootBtn.TextSize = 14; LootBtn.Font = Enum.Font.GothamBold
 LootBtn.AutoButtonColor = false; LootBtn.ZIndex = 12
 Instance.new("UICorner", LootBtn).CornerRadius = UDim.new(0, 10)

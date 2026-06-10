@@ -1,3 +1,10 @@
+print("KeySystem started")
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+print("Player:", player and player.Name)
+
 -- BARF QH Key System
 -- Place this at the TOP of your script, before any other code.
 
